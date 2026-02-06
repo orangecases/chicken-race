@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>치킨 런 - 싱글 테스트</title>
+    <link rel="stylesheet" href="style/style.css">
+</head>
+<body>
+<div id="app-container">
+
+    <section id="scene-intro">
+        <div class="home">
+            <img class="game_title" src="/assets/images/home-game_title.png" />
+            <div class="btn_group">
+                <button id="btn-login-single" class="home-main-btn"></button>
+                <button id="btn-create-room-open" class="home-main-btn"></button>
+            </div>
+            <button id="btn-member" class="ui-icon-btn --member"></button>
+            <label class="coin-stat"><img src="assets/images/icon_coin.png" /> X <strong>50</strong></label>
+        </div>
+
+        <div id="lobby-list-container">
+            <div class="list-tabgroup">
+                <div id="tab-race-room" class="tab active">
+                    <img class="icon" src="assets/images/icon_door.png">
+                    <h3>레이스룸</h3>
+                    <button class="refresh">새로고침</button> 
+                </div>
+                <div id="tab-my-rooms" class="tab">
+                    <img class="icon" src="assets/images/icon_key.png"><h3>참가중</h3>
+                    <button class="refresh">새로고침</button> 
+                </div>
+            </div>
+
+            <div id="content-race-room" class="list-scroll-area">
+                <ul class="score-list">
+                </ul>
+            </div>
+
+            <div id="content-my-rooms" class="list-scroll-area hidden">
+                <ul class="score-list">
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <section id="scene-create-room" class="hidden">
+        <div class="modal-container modal-theme-orange">
+            <div class="modal-body">
+                <div class="input-group">
+                    <label>방 제목</label>
+                    <input type="text" id="input-room-title" placeholder="닭들의 전쟁 (최대 20자)" maxlength="20">
+                </div>
+
+                <div class="input-group">
+                    <label>비밀번호</label>
+                    <input type="text" id="input-room-password-create" placeholder="공개" maxlength="10">
+                </div>
+                
+                <div class="input-group">
+                    <label>순위 결정 방식</label>
+                    <div class="btn-group-toggle" id="group-rank-type">
+                        <button type="button" class="active" data-val="best">최고점</button>
+                        <button type="button" data-val="total">점수 합산</button>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>시도 횟수 <span id="display-attempts">3</span>회 (<span class="coin-count"><img src="assets/images/icon_coin.png" /><small>-</small><span id="display-cost">3</span></span>)</label>
+                    <input type="range" id="input-room-attempts" min="1" max="5" value="3" step="1">
+                </div>
+
+                <div class="input-group">
+                    <label>참여 인원 (<span id="display-limit">5</span>명)</label>
+                    <input type="range" id="input-room-limit" min="2" max="10" value="4" step="1">
+                    <span class="notice">※ <strong>4인</strong> 이상 참여시 <img class="agg" src="assets/images/icon_agg.png"><strong>달걀배지</strong>가 지급됩니다.</span>
+                </div>
+
+            </div>
+            <div class="modal-footer">
+                <button id="btn-create-cancel" class="pixelbtn pixelbtn--neutral">취소</button>
+                <button id="btn-create-confirm" class="pixelbtn pixelbtn--danger">만들기</button>
+            </div>
+        </div>
+    </section>
+
+    <section id="scene-password-input" class="hidden">
+        <div class="modal-container modal-theme-orange">
+            <div class="modal-body">
+                <div class="input-group">
+                    <label>비밀번호</label>
+                    <input type="password" id="input-room-password" placeholder="비밀번호를 입력하세요">
+                </div>
+                <p id="password-message" class="auth-message"></p>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-password-cancel" class="pixelbtn pixelbtn--neutral">취소</button>
+                <button id="btn-password-confirm" class="pixelbtn pixelbtn--primary">입장</button>
+            </div>
+        </div>
+    </section>
+
+    <section id="scene-exit-confirm" class="hidden">
+        <div class="modal-container modal-theme-orange">
+            <div class="modal-body">
+                <p class="auth-message" style="display:block; color:#000;">현재 진행중인 게임을 종료하고<br>홈으로 이동합니다.</p>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-exit-cancel" class="pixelbtn pixelbtn--neutral">취소</button>
+                <button id="btn-exit-confirm" class="pixelbtn pixelbtn--danger">나가기</button>
+            </div>
+        </div>
+    </section>
+
+    <section id="scene-delete-room-confirm" class="hidden">
+        <div class="modal-container modal-theme-orange">
+            <div class="modal-body">
+                <p class="auth-message" style="display:block; color:#000;">해당 게임 참가중인 게임 목록에서 삭제합니다.</p>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-delete-room-cancel" class="pixelbtn pixelbtn--neutral">취소</button>
+                <button id="btn-delete-room-confirm" class="pixelbtn pixelbtn--danger">삭제</button>
+            </div>
+        </div>
+    </section>
+
+    <section id="scene-auth" class="hidden">
+        <div class="modal-container"> <!-- 공통 모달 스타일 사용 -->
+            <div class="modal-header">
+                <h3>로그인</h3>
+                <button class="close_modal">취소</button>
+            </div>
+            <div class="modal-body">
+                <!-- TODO: 실제 SNS 로그인 연동 필요 -->
+                <div class="sns-login-group">
+                    <button class="sns-btn kakao">Kakao 계정으로 로그인</button>
+                    <button class="sns-btn naver">Naver 계정으로 로그인</button>
+                    <button class="sns-btn facebook">Facebook 계정으로 로그인</button>
+                    <button class="sns-btn youtube">YouTube 계정으로 로그인</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="scene-user-profile" class="hidden">
+        <div class="modal-container">
+            <!-- 공통 모달 스타일 사용 -->
+            <!-- <div class="modal-header">
+                <h3>사용자 정보</h3>
+                <button class="close_modal">취소</button>
+            </div> -->
+            <div class="modal-body">
+                <div class="input-group">
+                    <label>ID</label>
+                    <input type="text" id="profile-id" readonly>
+                </div>
+                <div class="input-group">
+                    <label>닉네임</label>
+                    <input type="text" id="profile-nickname" placeholder="사용할 닉네임을 입력하세요" maxlength="12">
+                </div>
+                <div class="input-group row">
+                    <label>보유금화</label>
+                    <span class="coin-count"><button id="btn-recharge-coin">충전</button><span id="profile-coin-count">30</span><small>X</small><img src="assets/images/icon_coin.png"></span>
+                </div>
+                <div class="input-group">
+                    <label>획득 뱃지</label>
+                    <div class="badge-display">
+                        <div class="badge-item"><img src="assets/images/badge1th.png" alt="1등 뱃지"><span id="badge-count-1">0</span></div>
+                        <div class="badge-item"><img src="assets/images/badge2th.png" alt="2등 뱃지"><span id="badge-count-2">0</span></div>
+                        <div class="badge-item"><img src="assets/images/badge3th.png" alt="3등 뱃지"><span id="badge-count-3">0</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-logout" class="pixelbtn pixelbtn--danger">로그아웃</button>
+                <button id="btn-profile-confirm" class="pixelbtn pixelbtn--primary">확인</button>
+            </div>
+        </div>
+    </section>
+
+    <section id="scene-game" class="hidden">
+        
+        <section id="game-container">
+            <div class="game-hud">
+                <div class="hud-level">LV.1</div>
+                <div class="hud-score">
+                    <span class="score-val">0</span>M
+                </div>
+            </div>
+
+            <button id="btn-pause-toggle" class="ui-icon-btn --pause"></button>
+            <button id="btn-sound-toggle" class="ui-icon-btn --sound"></button>
+
+            <div id="game-start-screen" class="game-overlay-screen hidden">
+                <h1>READY?</h1>
+                <button id="btn-race-start">
+                    <span class="play-cost"><img src="assets/images/icon_coin.png"> - <strong>1</strong></span>
+                </button>
+                <button id="btn-exit-from-start" class="btn-exit-to-home">HOME</button>
+                <label class="coin-stat"><img src="assets/images/icon_coin.png" /> X <strong>50</strong></label>
+                <p class="time-message">15초 후 자동 아웃</p>               
+            </div>
+
+            <div id="game-pause-screen" class="game-overlay-screen hidden">
+                <h1>PAUSE</h1>
+                <button id="btn-resume-game"></button>
+                <button id="btn-exit-from-pause" class="btn-exit-to-home">HOME</button>
+                <label class="coin-stat"><img src="assets/images/icon_coin.png" /> X <strong>50</strong></label>
+                <p class="time-message">30초 후 자동 시작</p>
+            </div>
+
+            <div id="game-over-screen" class="game-overlay-screen hidden">
+                <p class="message" id="gov-message">남은 횟수 : 0/0</p>
+                <h1 id="gov-title">GAME OVER</h1>
+                <button id="btn-restart">
+                    <span class="play-cost"><img src="assets/images/icon_coin.png"> - <strong>1</strong></span>
+                </button>
+                <button id="btn-delete-room" class="btn-delete-from-list">참가중인 목록에서 삭제</button>         
+                <button id="btn-exit-from-gameover" class="btn-exit-to-home">HOME</button>
+                <label class="coin-stat"><img src="assets/images/icon_coin.png" /> X <strong>50</strong></label>
+                <p class="time-message">30초 후 자동 시작</p>
+            </div>
+
+            <canvas id="gameCanvas"></canvas>
+        </section>
+
+        <section id="list-container">
+            
+            <div id="view-multi-rank" class="hidden">
+                <div class="list-title">
+                    <img class="icon" src="assets/images/icon_sword.png" />
+                    <h3>랭킹</h3>
+                    <span>(점수합산 또는 최고점)</span>
+                </div>
+                <div class="list-scroll-area">
+                    <ul class="score-list" id="multi-score-list">
+                    </ul>
+                </div>
+            </div>
+
+            <div id="view-single-mode">
+                <div class="list-tabgroup">
+                    <div id="tab-my-record" class="tab active">
+                        <img class="icon" src="assets/images/icon_hourglass.png"><h3>내기록</h3>
+                    </div>
+                    <div id="tab-top-100" class="tab">
+                        <img class="icon" src="assets/images/icon_trophy.png"><h3>Top 100</h3>
+                    </div>
+                </div>
+
+                <div id="content-my-record" class="list-scroll-area">
+                    <ul class="score-list">
+                    </ul>
+                </div>
+
+                <div id="content-top-100" class="list-scroll-area hidden">
+                    <ul class="score-list">
+                    </ul>
+                </div>
+            </div>
+
+        </section>
+
+        <section id="control-container">
+            <div class="control-frame">
+                <button id="btn-boost" class="game-btn"></button>
+                <div class="btn-spacer"></div> 
+                <button id="btn-jump" class="game-btn"></button>
+            </div>
+        </section>
+
+    </section>
+</div>
+<script src="js/game.js"></script>
+</body>
+</html>
