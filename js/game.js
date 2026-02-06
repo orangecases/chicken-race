@@ -590,6 +590,26 @@ function drawStaticFrame() {
     dog.draw(); chicken.draw();
 }
 
+/**
+ * [신규] Firebase Firestore에 점수 저장
+ */
+function saveScoreToFirebase(finalScore) {
+    const userNickname = (currentUser && currentUser.nickname) ? currentUser.nickname : "지나가던 병아리";
+
+    // Firebase Firestore에 데이터 저장하기
+    db.collection("rankings").add({
+        nickname: userNickname,
+        score: finalScore,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp() // 서버 시간 기록
+    })
+    .then((docRef) => {
+        console.log("✅ 점수가 서버에 기록되었습니다! ID:", docRef.id);
+    })
+    .catch((error) => {
+        console.error("❌ 점수 저장 실패:", error);
+    });
+}
+
 function handleGameOverUI() {
     const govTitle = document.getElementById('gov-title');
     const govMsg = document.getElementById('gov-message');
@@ -603,6 +623,7 @@ function handleGameOverUI() {
         
         // [신규] 이번 기록을 '내 기록'에 저장
         saveMyScore(finalScore);
+        saveScoreToFirebase(finalScore); // [신규] Firebase에 점수 저장
         govTitle.innerText = "GAME OVER";
         govMsg.innerText = ``; // 기록 메시지를 표시하지 않도록 비워둡니다.
         btnRestart.style.display = 'block';
