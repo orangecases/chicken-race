@@ -939,6 +939,40 @@ function renderTop100List() {
 }
 
 /**
+ * [신규] 서버 랭킹 데이터를 화면에 표시
+ */
+function displayRankings(rankData) {
+    top100Scores = rankData.map((data, index) => ({
+        rank: index + 1,
+        score: data.score,
+        name: data.nickname
+    }));
+    renderTop100List();
+}
+
+function loadLeaderboard() {
+    // 1. 'rankings' 상자에서 점수(score)가 높은 순(desc)으로 10개만 가져와라!
+    db.collection("rankings")
+      .orderBy("score", "desc")
+      .limit(10)
+      .get()
+      .then((querySnapshot) => {
+          console.log("🏆 랭킹 데이터를 가져왔습니다:");
+          
+          let rankData = [];
+          querySnapshot.forEach((doc) => {
+              rankData.push(doc.data()); // nickname, score 등이 담겨 있음
+          });
+
+          // 2. 이 데이터를 화면에 그리는 함수에 전달하세요!
+          displayRankings(rankData); 
+      })
+      .catch((error) => {
+          console.error("❌ 랭킹 불러오기 실패:", error);
+      });
+}
+
+/**
  * [신규] 사용자 정보 모달을 열고 데이터를 채웁니다.
  */
 function showUserProfile() {
@@ -2320,9 +2354,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // [수정] 레이스룸/참가중 탭 전환 시에는 renderRoomLists 함수를 콜백으로 전달하여 목록을 새로고침합니다.
     initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', () => renderRoomLists(true));
     
-    // [수정] 내기록/Top100 탭은 기존과 동일하게 콜백 없이 동작합니다.
-    // (이 목록들은 게임 플레이를 통해서만 갱신되므로, 탭 전환 시마다 새로 그릴 필요가 없습니다.)
-    initTabs('tab-my-record', 'tab-top-100', 'content-my-record', 'content-top-100', null);
+    // [수정] Top 100 탭 클릭 시 서버에서 랭킹 불러오기
+    initTabs('tab-my-record', 'tab-top-100', 'content-my-record', 'content-top-100', () => {
+        const tabTop100 = document.getElementById('tab-top-100');
+        if (tabTop100 && tabTop100.classList.contains('active')) {
+            loadLeaderboard();
+        }
+    });
 
     // [신규] 탭 내 새로고침 버튼 이벤트
     document.querySelectorAll('.list-tabgroup .refresh').forEach(btn => {
