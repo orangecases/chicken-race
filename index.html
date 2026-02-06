@@ -273,16 +273,23 @@
     </section>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
 <script>
-const firebaseConfig = {
+  const firebaseConfig = {
     apiKey: "AIzaSyAGBjJ1k04vgZgT-DSWcxrzLVIOpn2chB4",
     authDomain: "chicken-race-b4e3d.firebaseapp.com",
     projectId: "chicken-race-b4e3d",
     storageBucket: "chicken-race-b4e3d.firebasestorage.app",
     messagingSenderId: "60056337818",
     appId: "1:60056337818:web:30b777b291ad4d521b8e23"
-};
+  };
 
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+
+  console.log("🔥 Firebase 및 Firestore 준비 완료!");
 </script>
 
 <script src="js/game.js"></script>
