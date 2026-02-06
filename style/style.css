@@ -49,7 +49,7 @@ html, body small{font-size: 70%;}
     position: relative;
     width: 100%;
     max-width: 30rem; /* 기준 디자인 너비 78rem 대응 */
-    height: 100vh;
+    height: 100%;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
