@@ -982,7 +982,7 @@ function showUserProfile() {
     const scene = document.getElementById('scene-user-profile');
     if (!scene) return;
 
-    document.getElementById('profile-id').value = currentUser.id;
+    document.getElementById('profile-id').value = currentUser.email || currentUser.id; // [수정] ID 대신 이메일 표시
     document.getElementById('profile-nickname').value = currentUser.nickname;
     document.getElementById('badge-count-1').innerText = currentUser.badges['1'] || 0;
     document.getElementById('badge-count-2').innerText = currentUser.badges['2'] || 0;
@@ -1867,10 +1867,15 @@ function updateUserInfo(firebaseUser) {
     // 저장된 유저가 있고, ID가 같다면 그 데이터를 사용 (기존 데이터 유지)
     if (savedUser && savedUser.id === firebaseUser.uid) {
         currentUser = savedUser;
+        // [신규] 이전 버전 사용자를 위해 email 필드가 없으면 추가해줍니다.
+        if (!currentUser.email) {
+            currentUser.email = firebaseUser.email;
+        }
     } else {
         // 신규 유저이거나 다른 계정으로 로그인한 경우 초기화
         currentUser = {
             id: firebaseUser.uid,
+            email: firebaseUser.email, // [신규] 이메일 주소 저장
             nickname: firebaseUser.displayName || '이름없음',
             badges: { '1': 0, '2': 0, '3': 0 },
             coins: 50, // 기본 코인
