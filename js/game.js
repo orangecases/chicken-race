@@ -372,9 +372,6 @@ function updateCoinUI() {
         el.innerText = coinVal;
     });
     // [신규] 코인 변동 시 유저 정보 저장 (영속성 유지)
-    if (currentUser) {
-        localStorage.setItem('chickenRunUser', JSON.stringify(currentUser));
-    }
     // [신규] 광고 버튼 텍스트 업데이트 (남은 횟수 표시)
     const btnRecharge = document.getElementById('btn-recharge-coin');
     if (btnRecharge) {
@@ -449,7 +446,7 @@ function awardBadgeIfEligible() {
     const myRank = sortedPlayers.findIndex(p => p.id === myId) + 1;
     if (myRank >= 1 && myRank <= 3) {
         currentUser.badges[myRank] = (currentUser.badges[myRank] || 0) + 1;
-        localStorage.setItem('chickenRunUser', JSON.stringify(currentUser));
+        saveUserDataToFirestore();
     }
 }
 
@@ -595,9 +592,11 @@ function drawStaticFrame() {
  */
 function saveScoreToFirebase(finalScore) {
     const userNickname = (currentUser && currentUser.nickname) ? currentUser.nickname : "지나가던 병아리";
+    const uid = (currentUser && currentUser.id) ? currentUser.id : null;
 
     // Firebase Firestore에 데이터 저장하기
     db.collection("rankings").add({
+        uid: uid,
         nickname: userNickname,
         score: finalScore,
         timestamp: firebase.firestore.FieldValue.serverTimestamp() // 서버 시간 기록
@@ -1771,6 +1770,7 @@ function watchAdAndGetReward() {
         const currentAdData = getAdData();
         currentAdData.count++;
         localStorage.setItem('chickenRunAdData', JSON.stringify(currentAdData));
+        syncCoinsToServer(currentUser.coins); // [신규] 보상 획득 후 DB 저장
         updateCoinUI();
     };
 
@@ -1843,60 +1843,112 @@ function resetRoomData() {
 function loginWithGoogle() {
     const provider = new firebase.auth.GoogleAuthProvider();
     
-    firebase.auth().signInWithPopup(provider)
-        .then((result) => {
-            const user = result.user;
-            console.log("✅ 로그인 성공:", user.displayName);
-            
-            // 유저 정보를 게임 상태에 반영
-            updateUserInfo(user); 
-        })
-        .catch((error) => {
-            console.error("❌ 로그인 실패:", error.message);
-            alert("로그인 실패: " + error.message);
-        });
+    // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 감지합니다.
+    firebase.auth().signInWithPopup(provider).catch((error) => {
+        console.error("❌ 로그인 팝업 실패:", error.message);
+        // 사용자가 팝업을 닫는 등의 오류는 무시해도 괜찮습니다.
+        if (error.code !== 'auth/popup-closed-by-user') {
+            alert("로그인 중 오류가 발생했습니다: " + error.message);
+        }
+    });
 }
 
-// [신규] 로그인 성공 후 유저 정보 업데이트
-function updateUserInfo(firebaseUser) {
-    isLoggedIn = true;
-    
-    // 로컬 스토리지에서 기존 데이터 확인
-    let savedUser = JSON.parse(localStorage.getItem('chickenRunUser'));
-    
-    // 저장된 유저가 있고, ID가 같다면 그 데이터를 사용 (기존 데이터 유지)
-    if (savedUser && savedUser.id === firebaseUser.uid) {
-        currentUser = savedUser;
-        // [신규] 이전 버전 사용자를 위해 email 필드가 없으면 추가해줍니다.
-        if (!currentUser.email) {
-            currentUser.email = firebaseUser.email;
-        }
-    } else {
-        // 신규 유저이거나 다른 계정으로 로그인한 경우 초기화
-        currentUser = {
-            id: firebaseUser.uid,
-            email: firebaseUser.email, // [신규] 이메일 주소 저장
-            nickname: firebaseUser.displayName || '이름없음',
-            badges: { '1': 0, '2': 0, '3': 0 },
-            coins: 50, // 기본 코인
-            joinedRooms: {}
-        };
-    }
-    
-    localStorage.setItem('chickenRunUser', JSON.stringify(currentUser));
+// [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
+async function loadUserData(user) {
+    const userRef = db.collection("users").doc(user.uid);
+    try {
+        const doc = await userRef.get();
 
-    // UI 갱신
-    const sceneAuth = document.getElementById('scene-auth');
-    if (sceneAuth) sceneAuth.classList.add('hidden');
-    
-    showUserProfile();
-    updateCoinUI();
-    renderRoomLists(true);
+        if (!doc.exists) {
+            // 처음 가입한 유저: 초기 데이터 생성
+            console.log("✨ 신규 유저입니다. 데이터를 초기화합니다.");
+            const initialData = {
+                id: user.uid,
+                email: user.email,
+                nickname: user.displayName || '이름없음',
+                photoURL: user.photoURL,
+                coins: 10, // 신규 유저 보너스
+                badges: { '1': 0, '2': 0, '3': 0 },
+                joinedRooms: {}
+            };
+            await userRef.set(initialData);
+            currentUser = initialData;
+        } else {
+            // 기존 유저: 서버 데이터 사용
+            console.log("📥 기존 유저 데이터를 불러옵니다.");
+            currentUser = doc.data();
+        }
+
+        isLoggedIn = true;
+        
+        // 로그인 성공 후 공통 UI 처리
+        const sceneAuth = document.getElementById('scene-auth');
+        if (sceneAuth) sceneAuth.classList.add('hidden');
+        
+        updateCoinUI();
+        renderRoomLists(true);
+
+    } catch (error) {
+        console.error("❌ 유저 데이터 로딩 실패:", error);
+        alert("유저 데이터를 불러오는 중 오류가 발생했습니다.");
+    }
+}
+
+// [신규] 서버에 코인 수량만 업데이트하는 함수 (효율적)
+async function syncCoinsToServer(newCoinAmount) {
+    if (!currentUser) return;
+    const user = firebase.auth().currentUser;
+    if (user) {
+        try {
+            await db.collection("users").doc(user.uid).update({
+                coins: newCoinAmount
+            });
+            console.log("💰 서버 코인 동기화 완료:", newCoinAmount);
+        } catch (error) {
+            console.error("❌ 코인 동기화 실패:", error);
+        }
+    }
+}
+
+// [신규] 유저 객체 전체를 서버에 저장하는 함수 (닉네임, 뱃지 등)
+async function saveUserDataToFirestore() {
+    if (!currentUser) return;
+    const user = firebase.auth().currentUser;
+    if (user) {
+        try {
+            // merge: true 옵션으로 기존 필드를 덮어쓰지 않고 병합합니다.
+            await db.collection("users").doc(user.uid).set(currentUser, { merge: true });
+            console.log("💾 유저 데이터 전체 저장 완료");
+        } catch (error) {
+            console.error("❌ 유저 데이터 전체 저장 실패:", error);
+        }
+    }
 }
 
 // [6. 이벤트 리스너]
 
 document.addEventListener('DOMContentLoaded', () => {
+    // [신규] Firebase 인증 상태 변경 감지 리스너
+    firebase.auth().onAuthStateChanged((user) => {
+        if (user) {
+            // User is signed in.
+            loadUserData(user);
+        } else {
+            // User is signed out.
+            isLoggedIn = false;
+            currentUser = null;
+            console.log("❓ 로그아웃 상태");
+            
+            // UI 업데이트
+            updateCoinUI(); // 게스트 코인으로 UI 업데이트
+            renderRoomLists(true); // 로그아웃 상태의 방 목록으로 갱신
+            
+            // 열려있을 수 있는 프로필 모달 닫기
+            const sceneUserProfile = document.getElementById('scene-user-profile');
+            if (sceneUserProfile) sceneUserProfile.classList.add('hidden');
+        }
+    });
+
     // [신규] 페이지 로드 시, localStorage에 저장된 방 상태(플레이어 목록 및 점수)를 불러옵니다.
     roomPlayersCache = JSON.parse(localStorage.getItem('chickenRunRoomStates')) || {};
 
@@ -2080,9 +2132,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const newNickname = document.getElementById('profile-nickname').value.trim();
             if (newNickname && currentUser) {
                 currentUser.nickname = newNickname;
-                localStorage.setItem('chickenRunUser', JSON.stringify(currentUser)); // [신규] 닉네임 변경 저장
+                saveUserDataToFirestore(); // [신규] 닉네임 변경 시 DB에 저장
                 console.log('닉네임 변경됨:', currentUser.nickname);
-                // TODO: 변경된 닉네임을 서버에 저장하는 로직 필요
             }
             if (sceneUserProfile) sceneUserProfile.classList.add('hidden');
         };
@@ -2091,13 +2142,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // [신규] 로그아웃 버튼
     if (btnLogout) {
         btnLogout.onclick = () => {
-            isLoggedIn = false;
-            currentUser = null;
-            if (sceneUserProfile) sceneUserProfile.classList.add('hidden');
-            // TODO: 로그아웃 되었음을 알리는 UI 피드백을 주면 더 좋습니다.
-            console.log('로그아웃 되었습니다.');
-            updateCoinUI(); // [신규] 로그아웃 시 게스트 코인으로 UI 갱신
-            renderRoomLists(true); // [신규] 로그아웃 후 방 목록 갱신
+            firebase.auth().signOut().catch((error) => {
+                console.error('❌ 로그아웃 실패:', error);
+                alert('로그아웃 중 오류가 발생했습니다.');
+            });
+            // onAuthStateChanged 리스너가 나머지 UI 처리를 담당합니다.
         };
     }
 
@@ -2252,6 +2301,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 if (currentUser) {
                     currentUser.coins -= 1;
+                    syncCoinsToServer(currentUser.coins);
                 } else {
                     guestCoins -= 1;
                     localStorage.setItem('chickenRunGuestCoins', guestCoins);
@@ -2271,7 +2321,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentUser.coins -= cost;
                     userRoomState.isPaid = true;
                     updateCoinUI();
-                    localStorage.setItem('chickenRunUser', JSON.stringify(currentUser));
+                    saveUserDataToFirestore(); // 코인과 isPaid 상태를 함께 저장
                     updateButtonCosts(); // UI 갱신
                 }
             }
@@ -2315,6 +2365,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 if (currentUser) {
                     currentUser.coins -= 1;
+                    syncCoinsToServer(currentUser.coins);
                 } else {
                     guestCoins -= 1;
                     localStorage.setItem('chickenRunGuestCoins', guestCoins);
