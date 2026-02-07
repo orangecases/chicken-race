@@ -1839,6 +1839,56 @@ function resetRoomData() {
     }
 }
 
+// [신규] 구글 로그인 함수
+function loginWithGoogle() {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    
+    firebase.auth().signInWithPopup(provider)
+        .then((result) => {
+            const user = result.user;
+            console.log("✅ 로그인 성공:", user.displayName);
+            
+            // 유저 정보를 게임 상태에 반영
+            updateUserInfo(user); 
+        })
+        .catch((error) => {
+            console.error("❌ 로그인 실패:", error.message);
+            alert("로그인 실패: " + error.message);
+        });
+}
+
+// [신규] 로그인 성공 후 유저 정보 업데이트
+function updateUserInfo(firebaseUser) {
+    isLoggedIn = true;
+    
+    // 로컬 스토리지에서 기존 데이터 확인
+    let savedUser = JSON.parse(localStorage.getItem('chickenRunUser'));
+    
+    // 저장된 유저가 있고, ID가 같다면 그 데이터를 사용 (기존 데이터 유지)
+    if (savedUser && savedUser.id === firebaseUser.uid) {
+        currentUser = savedUser;
+    } else {
+        // 신규 유저이거나 다른 계정으로 로그인한 경우 초기화
+        currentUser = {
+            id: firebaseUser.uid,
+            nickname: firebaseUser.displayName || '이름없음',
+            badges: { '1': 0, '2': 0, '3': 0 },
+            coins: 50, // 기본 코인
+            joinedRooms: {}
+        };
+    }
+    
+    localStorage.setItem('chickenRunUser', JSON.stringify(currentUser));
+
+    // UI 갱신
+    const sceneAuth = document.getElementById('scene-auth');
+    if (sceneAuth) sceneAuth.classList.add('hidden');
+    
+    showUserProfile();
+    updateCoinUI();
+    renderRoomLists(true);
+}
+
 // [6. 이벤트 리스너]
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -2015,39 +2065,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // [신규] SNS 로그인 버튼 시뮬레이션
     document.querySelectorAll('.sns-btn').forEach(btn => {
         btn.onclick = () => {
-            // TODO: 여기에 실제 SNS 로그인 API 연동 로직이 필요합니다.
-            isLoggedIn = true;
-
-            // [수정] 저장된 유저 정보가 있으면 불러오고, 없으면 새로 생성합니다.
-            const savedUser = JSON.parse(localStorage.getItem('chickenRunUser'));
-            if (savedUser) {
-                currentUser = savedUser;
-                // [신규] 데이터 구조 마이그레이션: joinedRoomIds[] -> joinedRooms{}
-                if (currentUser.joinedRoomIds && !currentUser.joinedRooms) {
-                    currentUser.joinedRooms = {};
-                    currentUser.joinedRoomIds.forEach(id => {
-                        // 이전 버전 데이터는 시도 횟수 정보가 없으므로,
-                        // 재로그인 시 플레이 가능한 상태가 되는 버그를 막기 위해
-                        // '완료' 상태(시도 횟수 모두 소진)로 강제 마이그레이션합니다.
-                        const room = raceRooms.find(r => r.id === id);
-                        if (room) {
-                            currentUser.joinedRooms[id] = { usedAttempts: room.attempts };
-                        }
-                    });
-                    delete currentUser.joinedRoomIds; // 이전 데이터 구조 삭제
-                } else if (!currentUser.joinedRooms) {
-                    currentUser.joinedRooms = {}; // joinedRooms 속성이 아예 없는 경우 초기화
-                }
-            } else {
-                // [수정] joinedRoomIds 대신 joinedRooms 객체로 초기화
-                currentUser = { id: 'SuperChicken', nickname: 'SuperChicken', badges: { '1': 0, '2': 0, '3': 0 }, coins: 50, joinedRooms: {} };
-            }
-
-            // 로그인 모달을 닫고 사용자 정보 모달을 엽니다.
-            if (sceneAuth) sceneAuth.classList.add('hidden');
-            showUserProfile();
-            updateCoinUI(); // [신규] 로그인 직후 코인 UI 갱신
-            renderRoomLists(true); // [신규] 로그인 후 방 목록 갱신 (스냅샷 업데이트)
+            loginWithGoogle();
         };
     });
 
