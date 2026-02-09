@@ -1215,18 +1215,16 @@ html, body small{font-size: 70%;}
 }
 #btn-ad-close-video:active { background-color: rgba(255, 255, 255, 0.2); }
 
-/* [신규] 광고 시청 완료 버튼 (상단 우측, 닫기 버튼 위치 대체) */
-#btn-ad-complete {
-    all: unset; position: absolute; top: 1.25rem; right: 1rem;
-    padding: 0.5rem 0.75rem; background-color: #ffd02d;
-    color: #000; border: 1px solid #fff;
-    border-radius: 0.25rem; font-size: 0.8rem; font-weight: bold;
-    cursor: pointer; z-index: 310;
-    font-family: 'KoreanYNMYTM';
-    /* display: none; -> JS에서 제어 */
+/* [신규] 광고 시청 완료 상태 스타일 (기존 닫기 버튼에 클래스 추가) */
+#btn-ad-close-video.complete {
+    background-color: #ffd02d;
+    color: #000;
+    border-color: #fff;
+    font-weight: bold;
+    font-family: 'KoreanYNMYTM'; /* 완료 시 폰트 변경 */
     animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
-#btn-ad-complete:active { background-color: #e5b820; transform: translateY(2px); }
+#btn-ad-close-video.complete:active { background-color: #e5b820; transform: translateY(2px); }
 
 @keyframes popIn {
     from { transform: scale(0); opacity: 0; }
