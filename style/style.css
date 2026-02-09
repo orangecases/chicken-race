@@ -1214,19 +1214,3 @@ html, body small{font-size: 70%;}
     border-radius: 0.25rem; font-size: 0.8rem; cursor: pointer; z-index: 310;
 }
 #btn-ad-close-video:active { background-color: rgba(255, 255, 255, 0.2); }
-
-/* [신규] 광고 시청 완료 상태 스타일 (기존 닫기 버튼에 클래스 추가) */
-#btn-ad-close-video.complete {
-    background-color: #ffd02d;
-    color: #000;
-    border-color: #fff;
-    font-weight: bold;
-    font-family: 'KoreanYNMYTM'; /* 완료 시 폰트 변경 */
-    animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-#btn-ad-close-video.complete:active { background-color: #e5b820; transform: translateY(2px); }
-
-@keyframes popIn {
-    from { transform: scale(0); opacity: 0; }
-    to { transform: scale(1); opacity: 1; }
-}

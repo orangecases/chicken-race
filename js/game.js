@@ -1770,7 +1770,6 @@ function watchAdAndGetReward() {
             // [수정] 버튼 하나로 통합: 텍스트와 스타일, 동작을 변경
             if (btnCloseVideo) {
                 btnCloseVideo.innerText = "시청완료 ❯❯";
-                btnCloseVideo.classList.add('complete'); // 스타일 변경용 클래스 추가
                 
                 // 클릭 이벤트 재정의 (보상 획득 로직으로 교체)
                 btnCloseVideo.onclick = () => {
