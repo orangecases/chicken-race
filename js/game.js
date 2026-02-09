@@ -1725,9 +1725,8 @@ function watchAdAndGetReward() {
             </div>
 
             <!-- [수정] 닫기(포기) 버튼: 상단 우측 -->
+            <!-- [수정] 버튼 통합: 초기에는 닫기, 완료 시 시청완료 버튼으로 변신 -->
             <button id="btn-ad-close-video">✕ Close</button>
-            <!-- [신규] 시청 완료 버튼: 상단 우측 (초기에는 숨김, 닫기 버튼과 교체됨) -->
-            <button id="btn-ad-complete" style="display:none;">시청완료 ❯❯</button>
 
             <!-- (가상) 광고 컨텐츠 영역 -->
             <p>광고 영상이 재생되는 중입니다...</p>
@@ -1748,30 +1747,12 @@ function watchAdAndGetReward() {
     // UI 요소 가져오기
     const progressBar = document.getElementById('ad-progress-bar');
     const btnCloseVideo = document.getElementById('btn-ad-close-video');
-    const btnAdComplete = document.getElementById('btn-ad-complete');
 
     // 1. X 버튼 (Close) 이벤트: 보상 포기
     btnCloseVideo.onclick = () => {
         clearInterval(adTimerInterval);
         adOverlay.classList.add('hidden');
         alert('광고를 건너뛰어 보상을 받지 못했습니다.');
-    };
-
-    // 2. 완료 버튼 (Complete) 이벤트: 보상 화면 이동
-    btnAdComplete.onclick = () => {
-        // 보상 화면 전환
-        const viewLoading = document.getElementById('ad-view-loading');
-        const viewFinished = document.getElementById('ad-view-finished');
-        if (viewLoading) viewLoading.style.display = 'none';
-        if (viewFinished) viewFinished.style.display = 'flex';
-
-        // 보상 지급
-        currentUser.coins += AD_CONFIG.REWARD;
-        const currentAdData = getAdData();
-        currentAdData.count++;
-        localStorage.setItem('chickenRunAdData', JSON.stringify(currentAdData));
-        syncCoinsToServer(currentUser.coins); // [신규] 보상 획득 후 DB 저장
-        updateCoinUI();
     };
 
     // 10초 카운트다운 및 프로그레스 바 시뮬레이션
@@ -1786,9 +1767,26 @@ function watchAdAndGetReward() {
         if (elapsedTime >= AD_CONFIG.DURATION) {
             clearInterval(adTimerInterval);
 
-            // [수정] 닫기 버튼을 숨기고 완료 버튼을 표시 (토글 효과)
-            if (btnCloseVideo) btnCloseVideo.style.display = 'none';
-            if (btnAdComplete) btnAdComplete.style.display = 'block';
+            // [수정] 버튼 하나로 통합: 텍스트와 스타일, 동작을 변경
+            if (btnCloseVideo) {
+                btnCloseVideo.innerText = "시청완료 ❯❯";
+                btnCloseVideo.classList.add('complete'); // 스타일 변경용 클래스 추가
+                
+                // 클릭 이벤트 재정의 (보상 획득 로직으로 교체)
+                btnCloseVideo.onclick = () => {
+                    const viewLoading = document.getElementById('ad-view-loading');
+                    const viewFinished = document.getElementById('ad-view-finished');
+                    if (viewLoading) viewLoading.style.display = 'none';
+                    if (viewFinished) viewFinished.style.display = 'flex';
+
+                    currentUser.coins += AD_CONFIG.REWARD;
+                    const currentAdData = getAdData();
+                    currentAdData.count++;
+                    localStorage.setItem('chickenRunAdData', JSON.stringify(currentAdData));
+                    syncCoinsToServer(currentUser.coins);
+                    updateCoinUI();
+                };
+            }
         }
     }, 50); // 50ms 간격으로 부드럽게 업데이트
 
