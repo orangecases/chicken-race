@@ -973,6 +973,42 @@ function loadLeaderboard() {
 }
 
 /**
+ * [신규] Firestore에서 실시간으로 방 목록을 감시하고 업데이트합니다.
+ */
+function listenForRoomUpdates() {
+    db.collection('rooms')
+      .orderBy('createdAt', 'desc') // 최신 방이 위로 오도록 정렬
+      .onSnapshot((querySnapshot) => {
+          console.log("🔄 실시간 방 목록 업데이트 감지!");
+          const newRooms = [];
+          querySnapshot.forEach((doc) => {
+              const roomData = doc.data();
+              // Firestore 데이터를 로컬 raceRooms 구조에 맞게 매핑합니다.
+              const mappedRoom = {
+                  id: doc.id, // Firestore 문서 ID를 방 ID로 사용
+                  title: roomData.title,
+                  limit: roomData.maxPlayers,
+                  current: roomData.currentPlayers,
+                  attempts: roomData.attempts,
+                  status: roomData.status,
+                  rankType: roomData.rankType,
+                  isLocked: !!roomData.password,
+                  password: roomData.password
+              };
+              newRooms.push(mappedRoom);
+          });
+
+          // 전역 raceRooms 배열을 서버에서 받아온 최신 데이터로 교체합니다.
+          raceRooms = newRooms;
+
+          // 목록 UI를 새로운 데이터로 다시 그리고, 스냅샷을 갱신합니다.
+          renderRoomLists(true);
+      }, (error) => {
+          console.error("❌ 실시간 방 목록 감시 실패:", error);
+      });
+}
+
+/**
  * [신규] 사용자 정보 모달을 열고 데이터를 채웁니다.
  */
 function showUserProfile() {
@@ -1309,8 +1345,8 @@ function renderRoomLists(refreshSnapshot = false) {
             .map(r => r.id);
         
         // 2. 내 방 스냅샷: 현재 참가 중인 방
-        myRoomSnapshot = (isLoggedIn && currentUser && currentUser.joinedRooms) 
-            ? Object.keys(currentUser.joinedRooms).map(id => parseInt(id)) : [];
+        // [수정] Firestore ID는 문자열이므로 parseInt 제거
+        myRoomSnapshot = (isLoggedIn && currentUser && currentUser.joinedRooms) ? Object.keys(currentUser.joinedRooms) : [];
     }
 
     raceRoomList.innerHTML = '';
@@ -1659,17 +1695,30 @@ function handleHomeButtonClick() {
 /**
  * [신규] 현재 방을 목록에서 삭제하고 로비로 이동
  */
-function deleteCurrentRoom() {
-    // [수정] joinedRoomIds -> joinedRooms 객체에서 해당 방 정보 삭제
-    if (currentRoom && currentUser && currentUser.joinedRooms[currentRoom.id]) {
-        delete currentUser.joinedRooms[currentRoom.id];
-        // [신규] 방이 삭제되면, 저장된 방 상태 캐시에서도 해당 방 정보를 제거합니다.
-        if (roomPlayersCache[currentRoom.id]) {
-            delete roomPlayersCache[currentRoom.id];
-        }
-        renderRoomLists(true);
+async function deleteCurrentRoom() {
+    if (!currentRoom || !currentRoom.id) {
+        console.warn("삭제할 방 정보가 없습니다. 로비로 이동합니다.");
+        exitToLobby();
+        return;
     }
-    exitToLobby();
+
+    const roomId = currentRoom.id;
+
+    try {
+        // 1. db.collection('rooms').doc(roomId).delete()를 사용하여 서버에서 해당 데이터를 삭제합니다.
+        await db.collection('rooms').doc(roomId).delete();
+        console.log(`✅ 방 [${roomId}]이(가) 서버에서 성공적으로 삭제(폭파)되었습니다.`);
+
+        // 2. 삭제 성공 시 유저를 메인 로비로 이동시킵니다.
+        // onSnapshot 리스너가 방 목록 UI를 자동으로 갱신할 것입니다.
+        // exitToLobby()는 내부적으로 많은 로컬 정리를 수행하므로 재사용합니다.
+        // exitToLobby()가 더 이상 존재하지 않는 방에 대한 로직을 수행하지 않도록 currentRoom을 null로 설정합니다.
+        currentRoom = null;
+        exitToLobby();
+    } catch (error) {
+        console.error(`❌ 방 [${roomId}] 삭제 실패:`, error);
+        alert("방을 삭제하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
+    }
 }
 
 /**
@@ -1960,14 +2009,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // [신규] 페이지 로드 시, localStorage에 저장된 방 상태(플레이어 목록 및 점수)를 불러옵니다.
     roomPlayersCache = JSON.parse(localStorage.getItem('chickenRunRoomStates')) || {};
 
-    // [신규] 로컬 스토리지에서 생성된 방 목록을 불러와 raceRooms에 병합합니다. (새로고침 시 사라짐 방지)
-    const savedCreatedRooms = JSON.parse(localStorage.getItem('chickenRunCreatedRooms')) || [];
-    savedCreatedRooms.forEach(savedRoom => {
-        if (!raceRooms.some(r => r.id === savedRoom.id)) {
-            raceRooms.unshift(savedRoom);
-        }
-    });
-
     // [신규] 기록 로드 및 렌더링
     generateTop100Scores(); // 랭킹 데이터를 먼저 생성
     myScores = JSON.parse(localStorage.getItem('chickenRunMyScores')) || [];
@@ -1977,6 +2018,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderMyRecordList();
     renderTop100List();
     renderRoomLists(true); // [수정] 초기 로드 시 스냅샷 생성
+    listenForRoomUpdates(); // [신규] 실시간 방 목록 감시 시작
 
     // [신규] 디버깅용 봇 추가/삭제 이벤트 핸들러 (이벤트 위임)
     const handleDebugBotAction = (e) => {
@@ -2166,52 +2208,63 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (btnCreateConfirm) {
-        btnCreateConfirm.onclick = () => {
+        btnCreateConfirm.onclick = async () => {
+            const user = firebase.auth().currentUser;
+            if (!user) {
+                alert("방을 만들려면 로그인이 필요합니다.");
+                return;
+            }
+
             const titleInput = document.getElementById('input-room-title').value;
-            const passwordInput = document.getElementById('input-room-password-create').value.trim(); // [신규] 비밀번호 값 읽기
+            const passwordInput = document.getElementById('input-room-password-create').value.trim();
             const limitInput = document.getElementById('input-room-limit').value;
             const attemptsInput = document.getElementById('input-room-attempts').value;
             const activeRankBtn = document.querySelector('#group-rank-type button.active');
             const rankType = activeRankBtn ? activeRankBtn.dataset.val : 'best';
-
-            // [신규] 방 만들기 코인 체크 (비용 = 시도 횟수)
             const attempts = parseInt(attemptsInput) || 3;
-            if (!currentUser || currentUser.coins < attempts) {
-                alert(`코인이 부족합니다.\n(필요: ${attempts}, 보유: ${currentUser ? currentUser.coins : 0})`);
+
+            if (currentUser.coins < attempts) {
+                alert(`코인이 부족합니다.\n(필요: ${attempts}, 보유: ${currentUser.coins})`);
                 return;
             }
-            // [수정] 방 생성 시에는 코인을 차감하지 않음 (게임 시작 시 차감)
-            // currentUser.coins -= attempts; 
-            // updateCoinUI();
 
-            const newRoom = { 
-                id: Date.now(), 
-                title: titleInput || "즐거운 레이스", 
-                limit: parseInt(limitInput) || 5, 
-                current: 1, 
-                attempts: parseInt(attemptsInput), 
+            const roomDataForFirestore = {
+                title: titleInput || "즐거운 레이스",
+                password: passwordInput.length > 0 ? passwordInput : null,
+                maxPlayers: parseInt(limitInput) || 5,
+                currentPlayers: 1,
+                creatorUid: user.uid,
+                attempts: attempts,
+                rankType: rankType,
                 status: "inprogress",
-                rankType: rankType, // [신규] 순위 결정 방식 저장
-                isLocked: passwordInput.length > 0, // [신규] 비밀번호가 있으면 잠금 상태
-                password: passwordInput.length > 0 ? passwordInput : null // [신규] 비밀번호 저장
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
 
-            // TODO: newRoom.rankType을 실제 랭킹 로직에 활용해야 합니다.
-            console.log("새로운 방 정보:", newRoom);
+            try {
+                const docRef = await db.collection("rooms").add(roomDataForFirestore);
+                console.log("✅ 방이 서버에 생성되었습니다! ID:", docRef.id);
 
-            // [신규] 방 생성자도 joinedRooms에 등록 (아직 지불하지 않음)
-            currentUser.joinedRooms[newRoom.id] = { usedAttempts: 0, isPaid: false };
+                const newRoomForGame = {
+                    id: docRef.id,
+                    title: roomDataForFirestore.title,
+                    limit: roomDataForFirestore.maxPlayers,
+                    current: 1,
+                    attempts: roomDataForFirestore.attempts,
+                    status: "inprogress",
+                    rankType: roomDataForFirestore.rankType,
+                    isLocked: !!roomDataForFirestore.password,
+                    password: roomDataForFirestore.password
+                };
 
-            raceRooms.unshift(newRoom);
+                currentUser.joinedRooms[newRoomForGame.id] = { usedAttempts: 0, isPaid: false };
+                
+                sceneCreateRoom.classList.add('hidden');
+                enterGameScene('multi', newRoomForGame);
 
-            // [신규] 생성된 방 정보를 로컬 스토리지에 저장
-            const currentCreatedRooms = JSON.parse(localStorage.getItem('chickenRunCreatedRooms')) || [];
-            currentCreatedRooms.push(newRoom);
-            localStorage.setItem('chickenRunCreatedRooms', JSON.stringify(currentCreatedRooms));
-
-            renderRoomLists(true); // [수정] 방 생성 시 목록 갱신
-            sceneCreateRoom.classList.add('hidden');
-            enterGameScene('multi', newRoom);
+            } catch (error) {
+                console.error("❌ 방 생성 실패:", error);
+                alert("방을 만드는 중 오류가 발생했습니다.");
+            }
         };
     }
 
@@ -2267,6 +2320,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnDeleteRoomConfirm) {
         btnDeleteRoomConfirm.onclick = () => {
             if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.add('hidden');
+            // [수정] Firestore 연동을 위해 async 함수로 변경되었으므로 호출 방식을 맞춥니다.
+            // 이 함수는 에러를 내부에서 처리하므로 await 없이 호출해도 무방합니다.
             deleteCurrentRoom();
         };
     }
