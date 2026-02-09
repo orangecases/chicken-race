@@ -731,6 +731,13 @@ html, body small{font-size: 70%;}
     position: relative;
     bottom: -8px;
 }
+.score-list li .character img.master-key-icon {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1.25rem;
+    height: 1.25rem;
+}
 .score-list li .character.active{
     background-color: #ffffff;
 }
@@ -742,13 +749,7 @@ html, body small{font-size: 70%;}
 }
 
 /* [신규] 멀티플레이 랭킹 방장 표시 아이콘 */
-.score-list li .character img.master-key-icon {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 1.25rem;
-    height: 1.25rem;
-}
+
 /* =========================================
    5. [신규] 씬(Scene) 관리 및 유틸리티
    ========================================= */
