@@ -724,6 +724,7 @@ html, body small{font-size: 70%;}
     padding: 0.5rem;
     background-color: #666666;
     display: flex;
+    position: relative; /* [신규] 방장 아이콘 위치 기준점 */
 }
 .score-list li .character img{
     width: 100%;
@@ -738,6 +739,15 @@ html, body small{font-size: 70%;}
 }
 .score-list li .character.me{
     background-color: #ffd02d;
+}
+
+/* [신규] 멀티플레이 랭킹 방장 표시 아이콘 */
+.master-key-icon {
+    position: absolute;
+    top: 0rem;
+    left: 0rem;
+    width: 1.25rem;
+    height: 1.25rem;
 }
 /* =========================================
    5. [신규] 씬(Scene) 관리 및 유틸리티

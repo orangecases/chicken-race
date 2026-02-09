@@ -993,7 +993,8 @@ function listenForRoomUpdates() {
                   status: roomData.status,
                   rankType: roomData.rankType,
                   isLocked: !!roomData.password,
-                  password: roomData.password
+                  password: roomData.password,
+                  creatorUid: roomData.creatorUid // [신규] 방장 ID 추가
               };
               newRooms.push(mappedRoom);
           });
@@ -1280,6 +1281,11 @@ function renderMultiRanking() {
         const rank = index + 1;
         const li = document.createElement('li');
         
+        // [신규] 방장 여부 확인
+        const isHost = currentRoom.creatorUid && p.id === currentRoom.creatorUid;
+        const hostIndicatorText = isHost ? `(방장)` : '';
+        const hostIconHtml = isHost ? `<img class="master-key-icon" src="assets/images/icon_masterkey.png">` : '';
+
         // 상태에 따른 캐릭터 스타일 및 이미지
         let charClass = 'character';
         let charImg = 'assets/images/chicken_back.png'; // 기본(대기)
@@ -1312,8 +1318,14 @@ function renderMultiRanking() {
         }
 
         li.innerHTML = `
-            <div class="${charClass}"><img src="${charImg}"></div>
-            <div class="info"><small>${p.name}</small><p class="score-display">${Math.floor(p.displayScore).toLocaleString()}<small>M</small></p></div>
+            <div class="${charClass}">
+                <img src="${charImg}">
+                ${hostIconHtml}
+            </div>
+            <div class="info">
+                <small>${p.name} ${hostIndicatorText}</small>
+                <p class="score-display">${Math.floor(p.displayScore).toLocaleString()}<small>M</small></p>
+            </div>
             ${statHtml}
         `;
         listEl.appendChild(li);
@@ -2254,7 +2266,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     status: "inprogress",
                     rankType: roomDataForFirestore.rankType,
                     isLocked: !!roomDataForFirestore.password,
-                    password: roomDataForFirestore.password
+                    password: roomDataForFirestore.password,
+                    creatorUid: roomDataForFirestore.creatorUid // [신규] 방장 ID 추가
                 };
 
                 currentUser.joinedRooms[newRoomForGame.id] = { usedAttempts: 0, isPaid: false };
