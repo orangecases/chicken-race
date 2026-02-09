@@ -1085,6 +1085,16 @@ function exitToLobby() {
         const userUsedAttempts = (currentUser && currentUser.joinedRooms[currentRoom.id]) ? currentUser.joinedRooms[currentRoom.id].usedAttempts : 0;
         if (myPlayer && myPlayer.status === 'waiting' && userUsedAttempts === 0) {
             clearAutoActionTimer();
+
+            // [FIX] 게임 시작 전 퇴장 시, 서버의 인원수를 1 감소시킵니다.
+            const roomRef = db.collection('rooms').doc(currentRoom.id);
+            roomRef.update({
+                currentPlayers: firebase.firestore.FieldValue.increment(-1)
+            }).then(() => {
+                console.log(`✅ 방 [${currentRoom.id}] 퇴장. 서버 인원 수 감소.`);
+            }).catch(error => {
+                console.error("❌ 방 퇴장 시 인원 수 업데이트 실패:", error);
+            });
             
             // [신규] 게임 시작 전(대기 상태) 퇴장 시 코인 환불 로직
             if (currentUser) {
@@ -1097,8 +1107,8 @@ function exitToLobby() {
                 }
             }
 
-            currentRoom.current = Math.max(0, currentRoom.current - 1); // 인원 수 복구
-            // [수정] isDeletedFromMyList 대신 사용자의 참가 목록에서 직접 제거
+            // [제거] 로컬 인원수 직접 수정 (onSnapshot이 처리)
+            // currentRoom.current = Math.max(0, currentRoom.current - 1);
             // [수정] joinedRoomIds -> joinedRooms 객체에서 해당 방 정보 삭제
             if (currentUser && currentUser.joinedRooms) {
                 delete currentUser.joinedRooms[currentRoom.id];
@@ -1223,6 +1233,11 @@ async function attemptToJoinRoom(room) {
         });
 
         console.log(`✅ 방 [${room.id}] 입장 트랜잭션 성공. 인원 수 증가.`);
+
+        // [FIX] 로컬 room 객체의 인원수를 즉시 증가시켜, onSnapshot의 비동기 지연으로 인해
+        // enterGameScene에서 봇 생성 시 인원수가 맞지 않는 문제를 해결합니다.
+        // onSnapshot이 실행되면 이 값은 서버 값으로 다시 덮어쓰여져 일관성이 유지됩니다.
+        room.current++;
 
         // 다른 '미시작' 방에서 자동으로 나가고 코인 환불
         if (currentUser.joinedRooms) {
