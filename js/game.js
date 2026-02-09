@@ -1340,22 +1340,10 @@ function renderRoomLists(refreshSnapshot = false) {
     const myRoomList = document.querySelector('#content-my-rooms .score-list');
     if(!raceRoomList || !myRoomList) return;
 
-    // [FIX] 데이터 동기화를 스냅샷 생성보다 먼저 수행합니다.
-    // 페이지 새로고침 시 raceRooms의 'current' 값이 갱신되지 않은 상태로
-    // 스냅샷이 생성되어, 인원이 꽉 찬 방이 목록에 포함되는 문제를 해결합니다.
-    raceRooms.forEach(room => {
-        const playersInCache = roomPlayersCache[room.id];
-        if (playersInCache) {
-            room.current = playersInCache.length;
-        }
-    });
-
     // [신규] 스냅샷 갱신 로직: 목록이 흔들리지 않도록 특정 시점에만 목록 구성을 확정합니다.
     if (refreshSnapshot) {
         // 1. 레이스룸 스냅샷: 종료되지 않고 인원이 차지 않은 방, [요청사항] 인원이 0명인 방 제외
-        raceRoomSnapshot = raceRooms
-            .filter(r => r.status !== 'finished' && r.current < r.limit && r.current > 0) 
-            .map(r => r.id);
+        raceRoomSnapshot = raceRooms.filter(r => r.status !== 'finished' && r.current < r.limit).map(r => r.id);
         
         // 2. 내 방 스냅샷: 현재 참가 중인 방
         // [수정] Firestore ID는 문자열이므로 parseInt 제거
@@ -1387,8 +1375,8 @@ function renderRoomLists(refreshSnapshot = false) {
             }
 
             // [신규] 인원이 가득 찼을 경우 상태 표시 변경 (목록에서 사라지지 않음)
-            const isFull = room.current >= room.limit;
-            const statusClass = isFull ? 'finished' : 'inprogress';
+            const isFull = room.current >= room.limit; // [수정] 서버에서 받아온 room.current를 직접 사용
+            const statusClass = isFull ? 'finished' : 'inprogress'; 
             
             // [신규] 뱃지 지급 가능 방(4인 이상) 표시
             const aggIcon = room.limit >= 4 ? '<img class="agg" src="assets/images/icon_agg.png">' : '';
