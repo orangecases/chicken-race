@@ -2034,60 +2034,47 @@ document.addEventListener('DOMContentLoaded', () => {
     listenForRoomUpdates(); // [신규] 실시간 방 목록 감시 시작
 
     // [신규] 디버깅용 봇 추가/삭제 이벤트 핸들러 (이벤트 위임)
-    const handleDebugBotAction = (e) => {
+    // [수정] 서버 연동에 따라 Firestore 데이터를 직접 수정하도록 변경
+    const handleDebugBotAction = async (e) => {
         const target = e.target;
         if (!target.classList.contains('debug-btn')) return;
 
         e.stopPropagation(); // 부모 li의 방 입장 이벤트가 실행되는 것을 막습니다.
 
-        const roomId = parseInt(target.dataset.roomId);
+        const roomId = target.dataset.roomId; // Firestore ID는 문자열입니다.
         const action = target.dataset.action;
-        const room = raceRooms.find(r => r.id === roomId);
-        if (!room) return;
-        
-        // [FIX] 디버그 버튼이 항상 캐시를 조작하도록 수정하여 데이터 불일치 문제 해결
-        // 캐시가 없으면, 현재 인원수만큼 봇으로 채워 임시 캐시를 생성합니다.
-        if (!roomPlayersCache[roomId]) {
-            const bots = [];
-            for (let i = 0; i < room.current; i++) {
-                bots.push({
-                    id: `bot_pre_debug_${i}`, name: `임시봇${i + 1}`, score: 0, totalScore: 0, bestScore: 0,
-                    status: 'waiting', attemptsLeft: room.attempts,
-                    startDelay: Math.floor(Math.random() * 120) + 60, targetScore: 1500 + Math.floor(Math.random() * 3000), speedFactor: 1, changeTimer: 0
-                });
-            }
-            roomPlayersCache[roomId] = bots;
-        }
+        if (!roomId) return;
 
-        const playersInCache = roomPlayersCache[roomId];
-        
-        if (action === 'add') {
-            if (playersInCache.length < room.limit) {
-                const botCount = playersInCache.filter(p => p.id.toString().startsWith('bot')).length;
-                const newBot = {
-                    id: `bot_debug_${Date.now()}`, name: `디버그봇${botCount + 1}`, score: 0, totalScore: 0, bestScore: 0,
-                    status: 'waiting', attemptsLeft: room.attempts,
-                    startDelay: Math.floor(Math.random() * 120) + 60, targetScore: 1500 + Math.floor(Math.random() * 3000), speedFactor: 1, changeTimer: 0
-                };
-                playersInCache.push(newBot);
-            } else {
-                alert('인원이 가득 찼습니다.');
-            }
-        } else if (action === 'remove') {
-            const isPlayerIn = playersInCache && playersInCache.some(p => !p.id.toString().startsWith('bot'));
-            const minCount = isPlayerIn ? 1 : 0;
-            const botIndexToRemove = playersInCache.findLastIndex(p => p.id.toString().startsWith('bot'));
+        const roomRef = db.collection('rooms').doc(roomId);
 
-            if (playersInCache.length > minCount && botIndexToRemove > -1) {
-                playersInCache.splice(botIndexToRemove, 1);
-            } else {
-                alert('더 이상 인원을 줄일 수 없습니다.');
-            }
+        try {
+            await db.runTransaction(async (transaction) => {
+                const roomDoc = await transaction.get(roomRef);
+                if (!roomDoc.exists) {
+                    throw "존재하지 않는 방입니다.";
+                }
+
+                const data = roomDoc.data();
+                if (action === 'add') {
+                    if (data.currentPlayers < data.maxPlayers) {
+                        transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
+                    } else {
+                        console.warn(`[Debug] 방 [${roomId}]이(가) 가득 찼습니다.`);
+                    }
+                } else if (action === 'remove') {
+                    if (data.currentPlayers > 0) {
+                        transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
+                    } else {
+                        console.warn(`[Debug] 방 [${roomId}]은(는) 이미 비어있습니다.`);
+                    }
+                }
+            });
+            // 트랜잭션 성공 시 onSnapshot이 자동으로 UI를 업데이트하므로 별도 처리가 필요 없습니다.
+            console.log(`[Debug] 방 [${roomId}]의 인원수를 성공적으로 수정했습니다.`);
+        } catch (error) {
+            console.error("❌ 디버그 인원 수정 실패:", error);
+            // alert("인원 수정 중 오류가 발생했습니다."); // 필요 시 사용자에게 피드백
         }
-        // [FIX] 항상 캐시의 길이를 기준으로 현재 인원수를 동기화합니다.
-        room.current = playersInCache.length;
-        renderRoomLists(false); // [수정] 스냅샷 유지, UI만 갱신
-        saveRoomStates(); // [신규] 디버깅으로 플레이어 목록 변경 시 상태 저장
     };
     document.getElementById('content-race-room').addEventListener('click', handleDebugBotAction, true);
     document.getElementById('content-my-rooms').addEventListener('click', handleDebugBotAction, true);
