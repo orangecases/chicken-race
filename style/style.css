@@ -742,7 +742,7 @@ html, body small{font-size: 70%;}
 }
 
 /* [신규] 멀티플레이 랭킹 방장 표시 아이콘 */
-.master-key-icon {
+.score-list li .character img.master-key-icon {
     position: absolute;
     top: 0;
     left: 0;
