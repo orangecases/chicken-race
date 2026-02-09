@@ -1726,13 +1726,12 @@ function watchAdAndGetReward() {
 
             <!-- [수정] 닫기(포기) 버튼: 상단 우측 -->
             <button id="btn-ad-close-video">✕ Close</button>
+            <!-- [신규] 시청 완료 버튼: 상단 우측 (초기에는 숨김, 닫기 버튼과 교체됨) -->
+            <button id="btn-ad-complete" style="display:none;">시청완료 ❯❯</button>
 
             <!-- (가상) 광고 컨텐츠 영역 -->
             <p>광고 영상이 재생되는 중입니다...</p>
             <div class="spinner"></div>
-
-            <!-- [수정] 보상 받기(스킵) 버튼: 시청 완료 시 등장 -->
-            <button id="btn-ad-reward-skip">Skip ❯❯</button>
         </div>
 
         <!-- 2. 보상 획득 화면 (초기에는 숨김) -->
@@ -1749,7 +1748,7 @@ function watchAdAndGetReward() {
     // UI 요소 가져오기
     const progressBar = document.getElementById('ad-progress-bar');
     const btnCloseVideo = document.getElementById('btn-ad-close-video');
-    const btnRewardSkip = document.getElementById('btn-ad-reward-skip');
+    const btnAdComplete = document.getElementById('btn-ad-complete');
 
     // 1. X 버튼 (Close) 이벤트: 보상 포기
     btnCloseVideo.onclick = () => {
@@ -1758,8 +1757,8 @@ function watchAdAndGetReward() {
         alert('광고를 건너뛰어 보상을 받지 못했습니다.');
     };
 
-    // 2. Skip 버튼 (Reward) 이벤트: 보상 화면 이동
-    btnRewardSkip.onclick = () => {
+    // 2. 완료 버튼 (Complete) 이벤트: 보상 화면 이동
+    btnAdComplete.onclick = () => {
         // 보상 화면 전환
         const viewLoading = document.getElementById('ad-view-loading');
         const viewFinished = document.getElementById('ad-view-finished');
@@ -1787,10 +1786,9 @@ function watchAdAndGetReward() {
         if (elapsedTime >= AD_CONFIG.DURATION) {
             clearInterval(adTimerInterval);
 
-            // Skip 버튼 표시
-            if (btnRewardSkip) btnRewardSkip.style.display = 'block';
-            // X 버튼 숨김 (완료했으므로 포기 버튼 제거)
+            // [수정] 닫기 버튼을 숨기고 완료 버튼을 표시 (토글 효과)
             if (btnCloseVideo) btnCloseVideo.style.display = 'none';
+            if (btnAdComplete) btnAdComplete.style.display = 'block';
         }
     }, 50); // 50ms 간격으로 부드럽게 업데이트
 
@@ -1855,9 +1853,12 @@ function loginWithGoogle() {
 }
 
 // [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
+async function loadUserData(user) {
 // [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현
 function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
+    try {
+        const doc = await userRef.get();
     
     // 기존 리스너가 있다면 해제
     if (unsubscribeUserData) {
@@ -1877,9 +1878,12 @@ function loadUserData(user) {
                 badges: { '1': 0, '2': 0, '3': 0 },
                 joinedRooms: {}
             };
+            await userRef.set(initialData);
+            currentUser = initialData;
             userRef.set(initialData);
         } else {
             // 기존 유저: 서버 데이터 사용
+            console.log("📥 기존 유저 데이터를 불러옵니다.");
             console.log("🔔 서버 데이터 변경 감지!");
             currentUser = doc.data();
             isLoggedIn = true;
@@ -1897,8 +1901,21 @@ function loadUserData(user) {
                 showUserProfile();
             }
         }
+
+        isLoggedIn = true;
+        
+        // 로그인 성공 후 공통 UI 처리
+        const sceneAuth = document.getElementById('scene-auth');
+        if (sceneAuth) sceneAuth.classList.add('hidden');
+        
+        updateCoinUI();
+        renderRoomLists(true);
+
+    } catch (error) {
     }, (error) => {
         console.error("❌ 유저 데이터 로딩 실패:", error);
+        alert("유저 데이터를 불러오는 중 오류가 발생했습니다.");
+    }
     });
 }
 

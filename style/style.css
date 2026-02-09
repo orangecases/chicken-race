@@ -1215,19 +1215,18 @@ html, body small{font-size: 70%;}
 }
 #btn-ad-close-video:active { background-color: rgba(255, 255, 255, 0.2); }
 
-/* [신규] 광고 시청 완료 후 나타나는 Skip(보상) 버튼 */
-#btn-ad-reward-skip {
-    all: unset; position: absolute; bottom: 20%; 
-    padding: 0.75rem 2.5rem; background-color: #ffd02d;
-    color: #000; border: 0.25rem solid #fff;
-    border-radius: 2rem; font-size: 1.2rem; font-weight: bold;
+/* [신규] 광고 시청 완료 버튼 (상단 우측, 닫기 버튼 위치 대체) */
+#btn-ad-complete {
+    all: unset; position: absolute; top: 1.25rem; right: 1rem;
+    padding: 0.5rem 0.75rem; background-color: #ffd02d;
+    color: #000; border: 1px solid #fff;
+    border-radius: 0.25rem; font-size: 0.8rem; font-weight: bold;
     cursor: pointer; z-index: 310;
     font-family: 'KoreanYNMYTM';
-    box-shadow: 0 4px 0 rgba(0,0,0,0.5);
-    display: none; /* 기본 숨김 */
+    /* display: none; -> JS에서 제어 */
     animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
-#btn-ad-reward-skip:active { transform: translateY(4px); box-shadow: none; }
+#btn-ad-complete:active { background-color: #e5b820; transform: translateY(2px); }
 
 @keyframes popIn {
     from { transform: scale(0); opacity: 0; }
