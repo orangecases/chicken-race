@@ -1179,7 +1179,7 @@ function exitToLobby() {
  * 코인, 인원 제한, 로그인 상태를 체크하고 참가 로직을 수행합니다.
  * @param {object} room - 참가하려는 방 객체
  */
-function attemptToJoinRoom(room) {
+async function attemptToJoinRoom(room) {
     if (!isLoggedIn) {
         const sceneAuth = document.getElementById('scene-auth');
         if (sceneAuth) {
@@ -1193,56 +1193,57 @@ function attemptToJoinRoom(room) {
         return;
     }
 
-    // [신규] 사용자가 이미 참가한 방인지 확인합니다.
     const hasJoined = currentUser && currentUser.joinedRooms && currentUser.joinedRooms[room.id];
 
     if (hasJoined) {
-        // 이미 참가한 방이면, 비용 처리 없이 바로 게임 씬으로 진입합니다.
         enterGameScene('multi', room);
         return;
     }
-
-    // --- 이하 코드는 신규 참가 시에만 실행됩니다. ---
 
     const cost = room.attempts;
     if (currentUser.coins < cost) {
         alert(`코인이 부족합니다. (필요: ${cost}, 보유: ${currentUser.coins})`);
         return;
     }
+    
+    // [수정] Firestore 트랜잭션을 사용하여 안전하게 인원 수를 증가시키고 입장 처리합니다.
+    const roomRef = db.collection('rooms').doc(room.id);
+    try {
+        await db.runTransaction(async (transaction) => {
+            const roomDoc = await transaction.get(roomRef);
+            if (!roomDoc.exists) { throw "존재하지 않는 방입니다."; }
 
-    if (room.current >= room.limit) {
-        alert('인원이 모두 충원되었습니다.');
-        return;
-    }
+            const serverRoomData = roomDoc.data();
+            // 2. 만약 currentPlayers가 maxPlayers와 같거나 크다면 입장을 차단합니다.
+            if (serverRoomData.currentPlayers >= serverRoomData.maxPlayers) { throw "방이 가득 찼습니다."; }
 
-    // 다른 '미시작' 방에서 자동으로 나가고 코인 환불
-    if (currentUser.joinedRooms) {
-        const unstartedJoinedRoomIds = Object.keys(currentUser.joinedRooms).filter(id => {
-            const roomState = currentUser.joinedRooms[id];
-            // [수정] usedAttempts가 0인 방을 '미시작'으로 간주
-            return roomState && roomState.usedAttempts === 0 && parseInt(id) !== room.id;
+            // 3. (고급) FieldValue.increment(1)을 사용해서 동시 접속 충돌을 방지하며 인원수를 1 증가시킵니다.
+            transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
         });
-        unstartedJoinedRoomIds.forEach(idToLeave => {
-            const roomToLeave = raceRooms.find(r => r.id === parseInt(idToLeave));
-            const roomState = currentUser.joinedRooms[idToLeave];
-            // [수정] 지불한 경우에만 환불
-            if (roomToLeave && roomState && roomState.isPaid) { 
-                currentUser.coins += roomToLeave.attempts; 
-            }
-            delete currentUser.joinedRooms[idToLeave]; // 목록에서 제거
-        });
+
+        console.log(`✅ 방 [${room.id}] 입장 트랜잭션 성공. 인원 수 증가.`);
+
+        // 다른 '미시작' 방에서 자동으로 나가고 코인 환불
+        if (currentUser.joinedRooms) {
+            const unstartedJoinedRoomIds = Object.keys(currentUser.joinedRooms).filter(id => {
+                const roomState = currentUser.joinedRooms[id];
+                // [수정] Firestore ID는 문자열이므로 parseInt 제거
+                return roomState && roomState.usedAttempts === 0 && id !== room.id;
+            });
+            unstartedJoinedRoomIds.forEach(idToLeave => {
+                const roomToLeave = raceRooms.find(r => r.id === idToLeave);
+                const roomState = currentUser.joinedRooms[idToLeave];
+                if (roomToLeave && roomState && roomState.isPaid) { currentUser.coins += roomToLeave.attempts; }
+                delete currentUser.joinedRooms[idToLeave];
+            });
+        }
+        currentUser.joinedRooms[room.id] = { usedAttempts: 0, isPaid: false };
+        enterGameScene('multi', room);
+    } catch (error) {
+        console.error("❌ 방 입장 실패:", error);
+        alert(error); // "방이 가득 찼습니다." 또는 "존재하지 않는 방입니다." 등의 메시지 표시
+        renderRoomLists(true); // 목록을 최신 상태로 갱신하여 사용자에게 정확한 정보를 보여줍니다.
     }
-
-    // [수정] 참여 시에는 코인을 차감하지 않음 (게임 시작 시 차감)
-    // currentUser.coins -= cost;
-    // updateCoinUI();
-
-    // [수정] room.current의 증가는 enterGameScene에서 플레이어 캐시가 실제로 생성/업데이트될 때 한 번만 처리하도록 로직을 이전합니다.
-    // room.current++;
-    // [신규 참가] 참가한 방의 상태를 유저 정보에 저장
-    currentUser.joinedRooms[room.id] = { usedAttempts: 0, isPaid: false };
-
-    enterGameScene('multi', room);
 }
 
 /**
