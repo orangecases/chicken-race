@@ -1081,6 +1081,9 @@ html, body small{font-size: 70%;}
 }
 
 /* [수정] Google을 YouTube로 변경하고 아이콘 추가 */
+.sns-btn.google { background-color: #FFFFFF; color: #191919; }
+.sns-btn.google::before { background-image: url(../assets/images/sns-google.png); }
+
 .sns-btn.youtube { background-color: #FF0000; color: #fff; }
 .sns-btn.youtube::before { background-image: url(../assets/images/sns-youtube.png); }
 
