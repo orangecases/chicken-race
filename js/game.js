@@ -1528,13 +1528,15 @@ function enterGameScene(mode, roomData = null) {
         const userUsedAttempts = userRoomState ? userRoomState.usedAttempts : 0;
         const myPlayerId = currentUser ? currentUser.id : 'me';
 
-        // [FIX] 플레이어 생성 로직을 명확하게 통합 및 수정합니다.
-        const playerExists = roomPlayersCache[currentRoom.id] && roomPlayersCache[currentRoom.id].some(p => p.id === myPlayerId);
+        // [FIX] 플레이어 생성 로직을 서버 데이터 기준으로 재구성합니다.
+        // 1. 캐시가 없거나, 캐시의 인원수가 서버의 인원수와 다르면 캐시를 새로 생성합니다.
+        //    (서버 인원수는 내가 방금 입장한 것이 반영된 최신 값입니다)
+        const cacheIsInvalid = !roomPlayersCache[currentRoom.id] || roomPlayersCache[currentRoom.id].length !== currentRoom.current;
 
-        if (!playerExists) {
-            // 플레이어가 캐시에 없는 경우 (신규 입장 또는 재입장)
-            
-            // 1. 플레이어 객체를 생성합니다.
+        if (cacheIsInvalid) {
+            console.log("캐시가 유효하지 않거나 없습니다. 서버 데이터 기준으로 새로 생성합니다.");
+
+            // 1a. '나'의 플레이어 객체를 생성합니다.
             const cachedScores = playerScoresCache[`${currentRoom.id}-${myPlayerId}`] || { totalScore: 0, bestScore: 0 };
             const myPlayerInRoom = { 
                 id: myPlayerId, 
@@ -1545,35 +1547,28 @@ function enterGameScene(mode, roomData = null) {
                 attemptsLeft: currentRoom.attempts
             };
 
-            if (!roomPlayersCache[currentRoom.id]) {
-                // 2a. 캐시가 없으면, '나'를 포함한 총인원에 맞춰 봇을 생성하고 캐시를 초기화합니다.
-                const newTotalPlayers = currentRoom.current + 1;
-                const botCount = newTotalPlayers - 1;
-                const bots = [];
-                const botNames = ['고수치킨', '초보닭', '구경꾼', '치킨런', '달려라하니', '양념반후라이드반', '파닭파닭', '치맥사랑', 'KFC할아버지'];
-                for (let i = 0; i < botCount; i++) {
-                    bots.push({ 
-                        id: `bot_initial_${i}`, 
-                        name: botNames[i % botNames.length], 
-                        score: 0, totalScore: 0, bestScore: 0, 
-                        status: 'waiting', attemptsLeft: currentRoom.attempts,
-                        // [Fix] 봇 시뮬레이션 속성 추가 (누락되어 봇이 움직이지 않던 문제 수정)
-                        startDelay: Math.floor(Math.random() * 120) + 60, targetScore: 1500 + Math.floor(Math.random() * 3000), speedFactor: 1, changeTimer: 0
-                    });
-                }
-                roomPlayersCache[currentRoom.id] = [myPlayerInRoom, ...bots];
-            } else {
-                // 2b. 캐시가 이미 있으면, '나'를 목록 맨 앞에 추가합니다.
-                roomPlayersCache[currentRoom.id].unshift(myPlayerInRoom);
+            // 1b. '나'를 제외한 나머지 인원수만큼 봇을 생성합니다.
+            const botCount = Math.max(0, currentRoom.current - 1);
+            const bots = [];
+            const botNames = ['고수치킨', '초보닭', '구경꾼', '치킨런', '달려라하니', '양념반후라이드반', '파닭파닭', '치맥사랑', 'KFC할아버지'];
+            for (let i = 0; i < botCount; i++) {
+                bots.push({ 
+                    id: `bot_initial_${i}`, 
+                    name: botNames[i % botNames.length], 
+                    score: 0, totalScore: 0, bestScore: 0, 
+                    status: 'waiting', attemptsLeft: currentRoom.attempts,
+                    startDelay: Math.floor(Math.random() * 120) + 60, targetScore: 1500 + Math.floor(Math.random() * 3000), speedFactor: 1, changeTimer: 0
+                });
             }
+            
+            // 1c. 캐시를 '나'와 생성된 봇들로 완전히 교체합니다.
+            roomPlayersCache[currentRoom.id] = [myPlayerInRoom, ...bots];
         }
 
-        // 3. 항상 캐시의 최신 상태를 기준으로 현재 인원수와 플레이어 목록을 동기화합니다.
-        currentRoom.current = roomPlayersCache[currentRoom.id].length;
-        saveRoomStates(); // [신규] 플레이어 목록이 변경되었으므로 상태를 저장합니다.
-
-        // 현재 방의 플레이어 목록을 활성화
+        // 2. 이제 캐시는 최신 상태이므로, 이를 기준으로 게임을 시작합니다.
         multiGamePlayers = roomPlayersCache[currentRoom.id];
+        saveRoomStates(); // 변경된 캐시를 localStorage에 저장합니다.
+
         const myPlayerInRoom = multiGamePlayers.find(p => p.id === myPlayerId);
 
         // [신규] 방이 이미 종료되었거나 모든 기회를 소진한 경우, 모든 플레이어 상태를 'dead'로 동기화하여 기록 유지
