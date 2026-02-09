@@ -25,6 +25,7 @@ let gameLoopId = null;
 let isSoundOn = true; // [신규] 사운드 상태 (true: ON, false: OFF)
 let isLoggedIn = false; // [신규] 로그인 상태
 let currentUser = null; // [신규] 로그인한 사용자 정보
+let unsubscribeUserData = null; // [신규] 유저 데이터 리스너 해제 함수
 let guestCoins = parseInt(localStorage.getItem('chickenRunGuestCoins') || '10'); // [신규] 게스트 코인 (기본 10)
 let multiGamePlayers = []; // [신규] 멀티플레이 참여자 목록
 let roomPlayersCache = {}; // [신규] 방별 전체 플레이어(봇 포함) 상태 저장소
@@ -1854,11 +1855,16 @@ function loginWithGoogle() {
 }
 
 // [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
-async function loadUserData(user) {
+// [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현
+function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
-    try {
-        const doc = await userRef.get();
+    
+    // 기존 리스너가 있다면 해제
+    if (unsubscribeUserData) {
+        unsubscribeUserData();
+    }
 
+    unsubscribeUserData = userRef.onSnapshot((doc) => {
         if (!doc.exists) {
             // 처음 가입한 유저: 초기 데이터 생성
             console.log("✨ 신규 유저입니다. 데이터를 초기화합니다.");
@@ -1871,27 +1877,29 @@ async function loadUserData(user) {
                 badges: { '1': 0, '2': 0, '3': 0 },
                 joinedRooms: {}
             };
-            await userRef.set(initialData);
-            currentUser = initialData;
+            userRef.set(initialData);
         } else {
             // 기존 유저: 서버 데이터 사용
-            console.log("📥 기존 유저 데이터를 불러옵니다.");
+            console.log("🔔 서버 데이터 변경 감지!");
             currentUser = doc.data();
+            isLoggedIn = true;
+            
+            // 로그인 성공 후 공통 UI 처리
+            const sceneAuth = document.getElementById('scene-auth');
+            if (sceneAuth) sceneAuth.classList.add('hidden');
+            
+            updateCoinUI();
+            renderRoomLists(true);
+            
+            // 프로필 모달이 열려있다면 갱신
+            const sceneUserProfile = document.getElementById('scene-user-profile');
+            if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
+                showUserProfile();
+            }
         }
-
-        isLoggedIn = true;
-        
-        // 로그인 성공 후 공통 UI 처리
-        const sceneAuth = document.getElementById('scene-auth');
-        if (sceneAuth) sceneAuth.classList.add('hidden');
-        
-        updateCoinUI();
-        renderRoomLists(true);
-
-    } catch (error) {
+    }, (error) => {
         console.error("❌ 유저 데이터 로딩 실패:", error);
-        alert("유저 데이터를 불러오는 중 오류가 발생했습니다.");
-    }
+    });
 }
 
 // [신규] 서버에 코인 수량만 업데이트하는 함수 (효율적)
@@ -1935,6 +1943,10 @@ document.addEventListener('DOMContentLoaded', () => {
             loadUserData(user);
         } else {
             // User is signed out.
+            if (unsubscribeUserData) {
+                unsubscribeUserData();
+                unsubscribeUserData = null;
+            }
             isLoggedIn = false;
             currentUser = null;
             console.log("❓ 로그아웃 상태");
