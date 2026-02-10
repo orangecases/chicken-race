@@ -1126,7 +1126,7 @@ function togglePause() {
 /**
  * [신규] 게임을 종료하고 로비(인트로) 화면으로 돌아갑니다.
  */
-function exitToLobby() {
+async function exitToLobby() { // Make exitToLobby async
     stopBGM(); // [신규] 로비로 나갈 때 BGM 정지
     if (gameLoopId) { cancelAnimationFrame(gameLoopId); gameLoopId = null; }
 
@@ -1231,7 +1231,7 @@ function exitToLobby() {
     updateCoinUI(); // [수정] 코인 환불 등이 발생할 수 있으므로 UI 업데이트
 
     // [수정] 로비로 돌아갈 때 항상 목록을 최신 상태로 갱신하여 동기화 문제를 해결합니다.
-    renderRoomLists(true);
+    await fetchRaceRooms(false); // Ensure raceRooms is updated and rendered before proceeding
 
     // 공통: 게임 씬을 숨기고 인트로 씬을 보여줍니다.
     document.getElementById('scene-intro').classList.remove('hidden');
