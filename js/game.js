@@ -1448,9 +1448,9 @@ function renderRoomLists(refreshSnapshot = false) {
     // [신규] 스냅샷 갱신 로직: 목록이 흔들리지 않도록 특정 시점에만 목록 구성을 확정합니다.
     if (refreshSnapshot) {
         // [FIX] 레이스룸 스냅샷 필터링 규칙 변경
-        // 1. 인원이 꽉 찬 방도 목록에 계속 표시 (`r.current < r.limit` 조건 제거)
+        // 1. 인원이 꽉 찬 방은 목록에서 제외 (`r.current < r.limit` 조건 추가)
         // 2. 인원이 0명인 방은 목록에서 제외 (`r.current > 0` 조건 추가)
-        raceRoomSnapshot = raceRooms.filter(r => r.status !== 'finished' && r.current > 0).map(r => r.id);
+        raceRoomSnapshot = raceRooms.filter(r => r.status !== 'finished' && r.current > 0 && r.current < r.limit).map(r => r.id);
         
         // 2. 내 방 스냅샷: 현재 참가 중인 방
         // [수정] Firestore ID는 문자열이므로 parseInt 제거
