@@ -2380,15 +2380,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     creatorUid: roomDataForFirestore.creatorUid // [신규] 방장 ID 추가
                 };
 
-                // [FIX] 생성한 방이 목록에 즉시 표시되지 않고, '참가중' 목록에도 추가되지 않는 문제를 해결합니다.
+                // [FIX] 방 생성 후 새로고침 시 방 목록이 사라지는 문제 및 '참가중' 목록에 방이 보이지 않는 문제 해결
+                // 원인: 로컬 `raceRooms` 배열에만 추가하고, `currentUser.joinedRooms` 변경 사항이 Firestore에 제대로 저장되지 않았습니다.
+                // 해결:
                 // 1. 생성된 방 정보를 로컬 방 목록(`raceRooms`)의 맨 앞에 추가하여, 로비로 돌아왔을 때 즉시 보이도록 합니다.
                 raceRooms.unshift(newRoomForGame);
 
                 // 2. 현재 유저의 '참가중인 방' 목록에 이 방을 추가합니다.
-                currentUser.joinedRooms[newRoomForGame.id] = { usedAttempts: 0, isPaid: false };
+                const newJoinedRoomEntry = { usedAttempts: 0, isPaid: false };
+                currentUser.joinedRooms[newRoomForGame.id] = newJoinedRoomEntry;
                 
-                // 3. 변경된 유저 정보를 Firestore에 저장하여, 앱을 재시작하거나 다른 기기에서도 '참가중' 상태가 유지되도록 합니다.
-                await saveUserDataToFirestore();
+                // 3. [핵심 수정] 유저의 `joinedRooms` 필드만 Firestore에 직접 업데이트하여 영속성을 확보합니다.
+                //    `saveUserDataToFirestore()`를 호출하는 대신, `joinedRooms` 맵의 특정 필드만 업데이트합니다.
+                await db.collection("users").doc(user.uid).update({
+                    [`joinedRooms.${newRoomForGame.id}`]: newJoinedRoomEntry
+                });
+                console.log("💾 유저의 joinedRooms에 새 방 정보 저장 완료");
 
                 sceneCreateRoom.classList.add('hidden');
                 enterGameScene('multi', newRoomForGame);
