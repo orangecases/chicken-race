@@ -523,6 +523,7 @@ function startAutoActionTimer(duration, type, selector) {
                     // [수정] 사용자별 시도 횟수 차감
                     if (currentUser && currentUser.joinedRooms[currentRoom.id]) {
                         currentUser.joinedRooms[currentRoom.id].usedAttempts++;
+                        saveUserDataToFirestore(); // [FIX] 시도 횟수 변경 시 서버에 즉시 저장
                     }
                     const myId = currentUser ? currentUser.id : 'me';
                     handleGameOverUI(); // UI 갱신 및 다음 타이머 시작 또는 게임 오버 처리
@@ -751,6 +752,7 @@ function gameLoop() {
                     // [수정] 사용자별 시도 횟수 차감
                     if (currentUser && currentUser.joinedRooms[currentRoom.id]) {
                         currentUser.joinedRooms[currentRoom.id].usedAttempts++;
+                        saveUserDataToFirestore(); // [FIX] 시도 횟수 변경 시 서버에 즉시 저장
                     }
                 }
 
@@ -1148,6 +1150,7 @@ function exitToLobby() {
                 // [수정] 사용자별 시도 횟수를 최대치로 설정
                 if (currentUser && currentUser.joinedRooms[currentRoom.id]) {
                     currentUser.joinedRooms[currentRoom.id].usedAttempts = currentRoom.attempts;
+                    saveUserDataToFirestore(); // [FIX] 시도 횟수 변경 시 서버에 즉시 저장
                 }
                 
                 // 점수 저장 (PLAYING/PAUSED 일 때만. GAMEOVER는 이미 저장됨)
@@ -1586,26 +1589,28 @@ function enterGameScene(mode, roomData = null) {
 
         const myPlayerInRoom = multiGamePlayers.find(p => p.id === myPlayerId);
 
-        // [신규] 방이 이미 종료되었거나 모든 기회를 소진한 경우, 모든 플레이어 상태를 'dead'로 동기화하여 기록 유지
-        if (myPlayerInRoom && (currentRoom.status === 'finished' || userUsedAttempts >= currentRoom.attempts)) {
+        // [FIX] 게임 완료(모든 기회 소진) 또는 방 종료 시 재입장하면 '시작' 화면이 뜨는 버그 수정
+        // 원인: 1. 방이 종료('finished')되었거나 내 모든 기회를 소진했음에도, 조건문 로직의 문제로 시작 화면이 표시될 수 있었습니다.
+        //       2. 시도 횟수(usedAttempts)가 서버에 즉시 저장되지 않아, 재입장 시 동기화가 깨지는 문제가 있었습니다.
+        const isMyGameOver = userUsedAttempts >= currentRoom.attempts;
+        const isRoomFinished = currentRoom.status === 'finished';
+
+        if (myPlayerInRoom && (isMyGameOver || isRoomFinished)) {
+            // 1. 방이 종료되었거나 내 게임이 끝난 상태이므로, 모든 플레이어 상태를 'dead'로 강제 동기화합니다.
             multiGamePlayers.forEach(p => {
                 if (p.status !== 'dead') {
                     p.status = 'dead';
-                    // 기록이 0인 봇들에게는 시뮬레이션된 최종 점수 부여
                     if (p.id !== myPlayerId && p.totalScore === 0 && p.bestScore === 0) {
                         if (currentRoom.rankType === 'total') p.totalScore = p.targetScore || 1500;
                         else p.bestScore = p.targetScore || 1500;
                     }
                 }
             });
-        }
-
-        // [수정] 신규 입장/재입장 공통 상태 체크 로직
-        // 1. 최종 게임오버 상태 (모든 기회 소진)
-        if (myPlayerInRoom && userUsedAttempts >= currentRoom.attempts) {
             myPlayerInRoom.status = 'dead';
+            
+            // 2. 'GAME OVER' 화면을 표시하고 즉시 함수를 종료하여, '시작' 화면이 표시되지 않도록 합니다.
             resetGame();
-            gameState = STATE.GAMEOVER; // [수정] 게임 상태를 종료 상태로 변경하여 쓰러진 닭이 그려지도록 함
+            gameState = STATE.GAMEOVER;
             drawStaticFrame();
             document.getElementById('game-over-screen').classList.remove('hidden');
             handleGameOverUI();
