@@ -1945,7 +1945,15 @@ function loadUserData(user) {
         } else {
             // 기존 유저: 서버 데이터 사용
             console.log("🔔 서버 데이터 변경 감지!");
-            currentUser = doc.data();
+            const serverData = doc.data();
+            // [FIX] 데이터 무결성 보장: 서버에서 필드가 누락된 경우(예: 수동 삭제) 기본값으로 초기화합니다.
+            // 이 처리를 통해 `joinedRooms`가 undefined가 되어 발생하는 'TypeError'를 방지합니다.
+            currentUser = {
+                ...serverData,
+                joinedRooms: serverData.joinedRooms || {},
+                badges: serverData.badges || { '1': 0, '2': 0, '3': 0 },
+                coins: serverData.coins !== undefined ? serverData.coins : 10
+            };
             isLoggedIn = true;
             
             // 로그인 성공 후 공통 UI 처리
