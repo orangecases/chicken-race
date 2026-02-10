@@ -1277,6 +1277,10 @@ async function attemptToJoinRoom(room) {
     
     const roomRef = db.collection('rooms').doc(room.id);
     try {
+        // [FIX] 신규 입장 시 플레이어 수가 맞지 않는 문제 해결 (e.g. 1/4 방에 들어가면 나 혼자 있는 현상)
+        // 원인: 로컬의 방 정보(stale)를 기준으로 인원 수를 계산하여, 서버의 최신 인원 수와 불일치했습니다.
+        // 해결: 트랜잭션 내에서 최종 인원 수를 확정하고, 그 값을 기준으로 게임 씬을 구성합니다.
+        let finalPlayerCount;
         await db.runTransaction(async (transaction) => {
             const roomDoc = await transaction.get(roomRef);
             if (!roomDoc.exists) { throw "존재하지 않는 방입니다."; }
@@ -1284,16 +1288,15 @@ async function attemptToJoinRoom(room) {
             const serverRoomData = roomDoc.data();
             if (serverRoomData.currentPlayers >= serverRoomData.maxPlayers) { throw "방이 가득 찼습니다."; }
 
-            // [FIX] 트랜잭션 내에서 최신 인원 수를 로컬 room 객체에 먼저 반영합니다.
-            room.current = serverRoomData.currentPlayers;
-
+            // 트랜잭션이 성공했을 때의 최종 인원 수를 미리 계산합니다.
+            finalPlayerCount = serverRoomData.currentPlayers + 1;
             transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
         });
 
         console.log(`✅ 방 [${room.id}] 입장 트랜잭션 성공. 인원 수 증가.`);
 
-        // [FIX] 트랜잭션 성공 후, 입장하는 '나'를 포함하여 로컬 인원 수를 1 증가시킵니다.
-        room.current++;
+        // 로컬 room 객체의 인원 수를 서버 트랜잭션 후의 최종 값으로 덮어씁니다.
+        room.current = finalPlayerCount;
 
         // 다른 '미시작' 방에서 자동으로 나가고 코인 환불
         if (currentUser.joinedRooms) {
@@ -1442,8 +1445,9 @@ function renderRoomLists(refreshSnapshot = false) {
         if (raceRoomSnapshot.includes(room.id)) {
             const raceLi = document.createElement('li');
 
-            // [신규] 사용자가 이미 참가한 방은 'already-joined' 클래스를 추가하여 시각적으로 구분합니다.
-            if (userRoomState) {
+            // [FIX] 'already-joined' 스타일이 방 생성 직후에도 적용되는 문제 수정
+            // 방에 참가만 한 상태가 아니라, 실제로 게임을 시작(코인 지불)했거나 시도 횟수를 사용한 경우에만 적용합니다.
+            if (userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0)) {
                 raceLi.classList.add('already-joined');
             }
 
@@ -2151,6 +2155,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const roomRef = db.collection('rooms').doc(roomId);
 
+        // [FIX] 봇 추가/삭제 버튼이 동작하지 않는 문제 해결
+        // 원인: 페이지네이션으로 변경 후 실시간 리스너(onSnapshot)가 없어, DB 변경 후 UI가 업데이트되지 않았습니다.
+        // 해결: 트랜잭션 성공 후, 로컬 데이터를 직접 수정하고 목록 UI를 수동으로 다시 렌더링합니다.
+        let finalCount; // 트랜잭션 내에서 결정된 최종 인원 수를 저장할 변수
         try {
             await db.runTransaction(async (transaction) => {
                 const roomDoc = await transaction.get(roomRef);
@@ -2161,23 +2169,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = roomDoc.data();
                 if (action === 'add') {
                     if (data.currentPlayers < data.maxPlayers) {
+                        finalCount = data.currentPlayers + 1;
                         transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
                     } else {
+                        finalCount = data.currentPlayers;
                         console.warn(`[Debug] 방 [${roomId}]이(가) 가득 찼습니다.`);
                     }
                 } else if (action === 'remove') {
                     if (data.currentPlayers > 0) {
+                        finalCount = data.currentPlayers - 1;
                         transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
                     } else {
+                        finalCount = data.currentPlayers;
                         console.warn(`[Debug] 방 [${roomId}]은(는) 이미 비어있습니다.`);
                     }
                 }
             });
-            // 트랜잭션 성공 시 onSnapshot이 자동으로 UI를 업데이트하므로 별도 처리가 필요 없습니다.
+            
+            const roomInList = raceRooms.find(r => r.id === roomId);
+            if (roomInList) {
+                roomInList.current = finalCount;
+                renderRoomLists(false); // 스냅샷은 유지하고 UI만 다시 그립니다.
+            }
             console.log(`[Debug] 방 [${roomId}]의 인원수를 성공적으로 수정했습니다.`);
         } catch (error) {
             console.error("❌ 디버그 인원 수정 실패:", error);
-            // alert("인원 수정 중 오류가 발생했습니다."); // 필요 시 사용자에게 피드백
         }
     };
     document.getElementById('content-race-room').addEventListener('click', handleDebugBotAction, true);
