@@ -616,9 +616,7 @@ html, body small{font-size: 70%;}
 }
 
 .score-list li.disabled {
-    opacity: 0.6;
     cursor: not-allowed;
-    background-color: #303534;
 }
 
 /* [신규] 입장 불가(마감) 방의 입장 버튼(chevron) 투명도 조절 */
