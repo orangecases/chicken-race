@@ -1625,7 +1625,11 @@ function enterGameScene(mode, roomData = null) {
         }
 
         // 3. [수정] 시작화면이 아니라 재시작(WOOPS) 화면으로 시작되도록 로직 변경
-        if (myPlayerInRoom && userUsedAttempts > 0 && (gameState === STATE.GAMEOVER || myPlayerInRoom.status === 'waiting')) {
+        // [FIX] 재입장 시 상태 판정 로직을 서버 데이터(`userUsedAttempts`) 기준으로 단순화하여 동기화 문제를 해결합니다.
+        // 기존 로직은 로컬 `gameState`나 캐시의 `status`에 의존하여, 데이터가 불일치할 경우 잘못된 화면(시작 화면)을 표시하는 문제가 있었습니다.
+        if (myPlayerInRoom && userUsedAttempts > 0) {
+            // 시도 횟수가 1회 이상 소진된 상태이므로, '재시도 대기' 상태로 동기화합니다.
+            myPlayerInRoom.status = 'waiting';
             drawStaticFrame();
             gameState = STATE.GAMEOVER; // 상태 동기화
             document.getElementById('game-over-screen').classList.remove('hidden');
