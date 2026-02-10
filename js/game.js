@@ -981,6 +981,8 @@ function loadLeaderboard() {
 }
 
 /**
+ * [신규] Firestore 문서 데이터를 로컬 방 객체 형식으로 변환하는 헬퍼 함수입니다.
+ */
 function mapFirestoreDocToRoom(doc) {
     const roomData = doc.data();
     return {
@@ -1004,61 +1006,68 @@ function mapFirestoreDocToRoom(doc) {
  * @description 실시간 업데이트(`onSnapshot`) 대신 '더보기'와 '새로고침'을 통한 수동 업데이트 방식으로 변경됩니다.
  * @param {boolean} loadMore - true이면 '더보기'로 다음 페이지를, false이면 목록을 새로고침합니다.
  */
-async function fetchRaceRooms(loadMore = false) {
-    if (isFetchingRooms) return;
-    isFetchingRooms = true;
+let roomFetchPromise = null; // [신규] 중복 호출 방지 및 대기 처리를 위한 Promise 변수
 
-    const loader = document.getElementById('race-room-loader');
-    if (loader) loader.classList.remove('hidden');
+async function fetchRaceRooms(loadMore = false) {
+    // [FIX] 이미 로딩 중이라면 해당 Promise를 반환하여 exitToLobby 등에서 기다릴 수 있게 합니다.
+    if (roomFetchPromise) return roomFetchPromise;
+
+    roomFetchPromise = (async () => {
+        const loader = document.getElementById('race-room-loader');
+        if (loader) loader.classList.remove('hidden');
+
+        try {
+            // 참여 가능한 방을 최신순으로 정렬하여 쿼리합니다.
+            let query = db.collection('rooms')
+                .orderBy('createdAt', 'desc')
+                .limit(ROOMS_PER_PAGE);
+
+            if (loadMore && lastVisibleRoomDoc) {
+                query = query.startAfter(lastVisibleRoomDoc);
+            } else {
+                // 새로고침 또는 첫 로드 시, 기존 목록을 초기화합니다.
+                raceRooms = [];
+                allRoomsLoaded = false;
+            }
+
+            const querySnapshot = await query.get();
+
+            const newRooms = [];
+            querySnapshot.forEach(doc => {
+                newRooms.push(mapFirestoreDocToRoom(doc));
+            });
+
+            // 새로 불러온 방 목록을 기존 목록에 추가합니다.
+            if (loadMore) {
+                raceRooms.push(...newRooms);
+            } else {
+                raceRooms = newRooms;
+            }
+
+            // 다음 페이지를 불러오기 위해 마지막 문서를 저장합니다.
+            lastVisibleRoomDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
+
+            // 더 이상 불러올 방이 없는지 확인합니다.
+            if (querySnapshot.docs.length < ROOMS_PER_PAGE) {
+                allRoomsLoaded = true;
+                if (loader) loader.classList.add('hidden'); // 모든 방을 불러왔으면 더보기 버튼 숨김
+            }
+
+            // 스냅샷을 갱신하며 화면을 다시 그립니다.
+            renderRoomLists(true);
+
+        } catch (error) {
+            console.error("❌ 레이스룸 목록 불러오기 실패:", error);
+        } finally {
+            if (loader && !allRoomsLoaded) loader.classList.remove('hidden');
+            else if (loader) loader.classList.add('hidden');
+        }
+    })();
 
     try {
-        // 참여 가능한 방을 최신순으로 정렬하여 쿼리합니다.
-        // [REVERT] 사용자가 DB의 테스트 데이터를 'createdAt' 필드가 포함되도록 재생성하기로 함에 따라,
-        // 최신순 정렬 기능을 다시 활성화합니다. 이제 새로 생성된 방은 목록 상단에 표시됩니다.
-        let query = db.collection('rooms')
-            .orderBy('createdAt', 'desc')
-            .limit(ROOMS_PER_PAGE);
-
-        if (loadMore && lastVisibleRoomDoc) {
-            query = query.startAfter(lastVisibleRoomDoc);
-        } else {
-            // 새로고침 또는 첫 로드 시, 기존 목록을 초기화합니다.
-            raceRooms = [];
-            allRoomsLoaded = false;
-        }
-
-        const querySnapshot = await query.get();
-
-        const newRooms = [];
-        querySnapshot.forEach(doc => {
-            newRooms.push(mapFirestoreDocToRoom(doc));
-        });
-
-        // 새로 불러온 방 목록을 기존 목록에 추가합니다.
-        if (loadMore) {
-            raceRooms.push(...newRooms);
-        } else {
-            raceRooms = newRooms;
-        }
-
-        // 다음 페이지를 불러오기 위해 마지막 문서를 저장합니다.
-        lastVisibleRoomDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
-
-        // 더 이상 불러올 방이 없는지 확인합니다.
-        if (querySnapshot.docs.length < ROOMS_PER_PAGE) {
-            allRoomsLoaded = true;
-            if (loader) loader.classList.add('hidden'); // 모든 방을 불러왔으면 더보기 버튼 숨김
-        }
-
-        // 스냅샷을 갱신하며 화면을 다시 그립니다.
-        renderRoomLists(true);
-
-    } catch (error) {
-        console.error("❌ 레이스룸 목록 불러오기 실패:", error);
+        await roomFetchPromise;
     } finally {
-        isFetchingRooms = false;
-        if (loader && !allRoomsLoaded) loader.classList.remove('hidden');
-        else if (loader) loader.classList.add('hidden');
+        roomFetchPromise = null;
     }
 }
 
@@ -2416,9 +2425,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 // 3. [핵심 수정] 유저의 `joinedRooms` 필드만 Firestore에 직접 업데이트하여 영속성을 확보합니다.
                 //    `saveUserDataToFirestore()`를 호출하는 대신, `joinedRooms` 맵의 특정 필드만 업데이트합니다.
-                await db.collection("users").doc(user.uid).update({
-                    [`joinedRooms.${newRoomForGame.id}`]: newJoinedRoomEntry
-                });
+                //    [FIX] joinedRooms 필드가 없을 경우를 대비해 set({ ... }, { merge: true })를 사용합니다.
+                await db.collection("users").doc(user.uid).set({
+                    joinedRooms: {
+                        [newRoomForGame.id]: newJoinedRoomEntry
+                    }
+                }, { merge: true });
                 console.log("💾 유저의 joinedRooms에 새 방 정보 저장 완료");
 
                 sceneCreateRoom.classList.add('hidden');
