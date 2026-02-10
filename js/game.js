@@ -34,6 +34,12 @@ let playerScoresCache = {}; // [신규] 방별 플레이어 점수 캐시
 let isJumpPressed = false; // [신규] 점프 버튼 누름 상태 유지 변수
 let displayedMyRecordsCount = 20; // [신규] 내 기록 표시 개수 (무한 스크롤용)
 
+// [수정] 페이지네이션(Pagination) 설정: 1만개 이상의 방이 있어도 앱이 원활하게 동작하도록 합니다.
+let lastVisibleRoomDoc = null; // 마지막으로 불러온 방의 문서 참조
+let isFetchingRooms = false;   // 방 목록을 불러오는 중인지 여부 (중복 호출 방지)
+const ROOMS_PER_PAGE = 10;     // 한 번에 불러올 방의 개수
+let allRoomsLoaded = false;    // 모든 방을 다 불러왔는지 여부 (더보기 버튼 표시 제어)
+
 // [신규] 광고 시스템 설정
 const AD_CONFIG = {
     REWARD: 5,      // 1회당 지급 코인
@@ -975,40 +981,83 @@ function loadLeaderboard() {
 }
 
 /**
- * [신규] Firestore에서 실시간으로 방 목록을 감시하고 업데이트합니다.
+function mapFirestoreDocToRoom(doc) {
+    const roomData = doc.data();
+    return {
+        id: doc.id,
+        title: roomData.title,
+        limit: roomData.maxPlayers,
+        current: roomData.currentPlayers,
+        attempts: roomData.attempts,
+        status: roomData.status,
+        rankType: roomData.rankType,
+        isLocked: !!roomData.password,
+        password: roomData.password,
+        creatorUid: roomData.creatorUid
+    };
+}
+
+/**
+ * [FIX] 방 목록 로딩 방식을 페이지네이션으로 전면 교체합니다.
+ * 1만개 이상의 방이 생성될 경우, 모든 방을 한 번에 불러오는 기존 방식은 성능 저하 및 비용 문제를 야기합니다.
+ * 이 함수는 Firestore에서 페이지 단위로 방 목록을 효율적으로 불러옵니다.
+ * @description 실시간 업데이트(`onSnapshot`) 대신 '더보기'와 '새로고침'을 통한 수동 업데이트 방식으로 변경됩니다.
+ * @param {boolean} loadMore - true이면 '더보기'로 다음 페이지를, false이면 목록을 새로고침합니다.
  */
-function listenForRoomUpdates() {
-    db.collection('rooms')
-      .orderBy('createdAt', 'desc') // 최신 방이 위로 오도록 정렬
-      .onSnapshot((querySnapshot) => {
-          console.log("🔄 실시간 방 목록 업데이트 감지!");
-          const newRooms = [];
-          querySnapshot.forEach((doc) => {
-              const roomData = doc.data();
-              // Firestore 데이터를 로컬 raceRooms 구조에 맞게 매핑합니다.
-              const mappedRoom = {
-                  id: doc.id, // Firestore 문서 ID를 방 ID로 사용
-                  title: roomData.title,
-                  limit: roomData.maxPlayers,
-                  current: roomData.currentPlayers,
-                  attempts: roomData.attempts,
-                  status: roomData.status,
-                  rankType: roomData.rankType,
-                  isLocked: !!roomData.password,
-                  password: roomData.password,
-                  creatorUid: roomData.creatorUid // [신규] 방장 ID 추가
-              };
-              newRooms.push(mappedRoom);
-          });
+async function fetchRaceRooms(loadMore = false) {
+    if (isFetchingRooms) return;
+    isFetchingRooms = true;
 
-          // 전역 raceRooms 배열을 서버에서 받아온 최신 데이터로 교체합니다.
-          raceRooms = newRooms;
+    const loader = document.getElementById('race-room-loader');
+    if (loader) loader.classList.remove('hidden');
 
-          // 목록 UI를 새로운 데이터로 다시 그리고, 스냅샷을 갱신합니다.
-          renderRoomLists(true);
-      }, (error) => {
-          console.error("❌ 실시간 방 목록 감시 실패:", error);
-      });
+    try {
+        // 참여 가능한 방을 최신순으로 정렬하여 쿼리합니다.
+        let query = db.collection('rooms')
+            .orderBy('createdAt', 'desc')
+            .limit(ROOMS_PER_PAGE);
+
+        if (loadMore && lastVisibleRoomDoc) {
+            query = query.startAfter(lastVisibleRoomDoc);
+        } else {
+            // 새로고침 또는 첫 로드 시, 기존 목록을 초기화합니다.
+            raceRooms = [];
+            allRoomsLoaded = false;
+        }
+
+        const querySnapshot = await query.get();
+
+        const newRooms = [];
+        querySnapshot.forEach(doc => {
+            newRooms.push(mapFirestoreDocToRoom(doc));
+        });
+
+        // 새로 불러온 방 목록을 기존 목록에 추가합니다.
+        if (loadMore) {
+            raceRooms.push(...newRooms);
+        } else {
+            raceRooms = newRooms;
+        }
+
+        // 다음 페이지를 불러오기 위해 마지막 문서를 저장합니다.
+        lastVisibleRoomDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
+
+        // 더 이상 불러올 방이 없는지 확인합니다.
+        if (querySnapshot.docs.length < ROOMS_PER_PAGE) {
+            allRoomsLoaded = true;
+            if (loader) loader.classList.add('hidden'); // 모든 방을 불러왔으면 더보기 버튼 숨김
+        }
+
+        // 스냅샷을 갱신하며 화면을 다시 그립니다.
+        renderRoomLists(true);
+
+    } catch (error) {
+        console.error("❌ 레이스룸 목록 불러오기 실패:", error);
+    } finally {
+        isFetchingRooms = false;
+        if (loader && !allRoomsLoaded) loader.classList.remove('hidden');
+        else if (loader) loader.classList.add('hidden');
+    }
 }
 
 /**
@@ -1088,10 +1137,24 @@ function exitToLobby() {
         if (myPlayer && myPlayer.status === 'waiting' && userUsedAttempts === 0) {
             clearAutoActionTimer();
 
-            // [FIX] 게임 시작 전 퇴장 시, 서버의 인원수를 1 감소시킵니다.
+            // [FIX] 게임 시작 전 퇴장 시, 트랜잭션을 사용하여 안전하게 인원수를 감소시키고, 0명이 되면 방을 자동 삭제합니다.
+            // 이 방식은 여러 사용자가 동시에 나가는 경우에도 데이터 정합성을 보장합니다.
             const roomRef = db.collection('rooms').doc(currentRoom.id);
-            roomRef.update({
-                currentPlayers: firebase.firestore.FieldValue.increment(-1)
+            db.runTransaction(async (transaction) => {
+                const roomDoc = await transaction.get(roomRef);
+                if (!roomDoc.exists) { return; } // 방이 이미 삭제된 경우
+
+                const currentData = roomDoc.data();
+                const newPlayerCount = currentData.currentPlayers - 1;
+
+                if (newPlayerCount <= 0) {
+                    // 마지막 플레이어가 나갔으므로 방을 삭제합니다.
+                    transaction.delete(roomRef);
+                    console.log(`✅ 방 [${currentRoom.id}]의 마지막 참가자가 퇴장하여 방을 자동으로 삭제합니다.`);
+                } else {
+                    // 아직 플레이어가 남아있으므로 인원수만 감소시킵니다.
+                    transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
+                }
             }).then(() => {
                 console.log(`✅ 방 [${currentRoom.id}] 퇴장. 서버 인원 수 감소.`);
             }).catch(error => {
@@ -1107,35 +1170,6 @@ function exitToLobby() {
                     currentUser.coins += refund;
                     // alert(`게임 대기 중 퇴장하여 코인이 환불되었습니다. (+${refund})`);
                 }
-            }
-
-            // [제거] 로컬 인원수 직접 수정 (onSnapshot이 처리)
-            // currentRoom.current = Math.max(0, currentRoom.current - 1);
-            // [수정] joinedRoomIds -> joinedRooms 객체에서 해당 방 정보 삭제
-            if (currentUser && currentUser.joinedRooms) {
-                delete currentUser.joinedRooms[currentRoom.id];
-            }
-            // [수정] 전역 변수뿐만 아니라, 방 캐시에서도 플레이어를 직접 제거하여 데이터 일관성을 유지합니다.
-            if (roomPlayersCache[currentRoom.id]) {
-                roomPlayersCache[currentRoom.id] = roomPlayersCache[currentRoom.id].filter(p => p.id !== myId);
-            }
-
-            // [신규] 참가자가 0명이 된 방은 목록 및 저장소에서 완전히 삭제합니다.
-            if (currentRoom.current <= 0) {
-                // 1. 전역 방 목록에서 제거
-                const roomIndex = raceRooms.findIndex(r => r.id === currentRoom.id);
-                if (roomIndex > -1) {
-                    raceRooms.splice(roomIndex, 1);
-                }
-                // 2. 로컬 스토리지(생성된 방 목록)에서 제거
-                let createdRooms = JSON.parse(localStorage.getItem('chickenRunCreatedRooms')) || [];
-                const initialLen = createdRooms.length;
-                createdRooms = createdRooms.filter(r => r.id !== currentRoom.id);
-                if (createdRooms.length !== initialLen) {
-                    localStorage.setItem('chickenRunCreatedRooms', JSON.stringify(createdRooms));
-                }
-                // 3. 방 상태 캐시에서 제거
-                delete roomPlayersCache[currentRoom.id];
             }
 
             multiGamePlayers = []; // 전역 플레이어 목록 초기화
@@ -1377,8 +1411,10 @@ function renderRoomLists(refreshSnapshot = false) {
 
     // [신규] 스냅샷 갱신 로직: 목록이 흔들리지 않도록 특정 시점에만 목록 구성을 확정합니다.
     if (refreshSnapshot) {
-        // 1. 레이스룸 스냅샷: 종료되지 않고 인원이 차지 않은 방, [요청사항] 인원이 0명인 방 제외
-        raceRoomSnapshot = raceRooms.filter(r => r.status !== 'finished' && r.current < r.limit).map(r => r.id);
+        // [FIX] 레이스룸 스냅샷 필터링 규칙 변경
+        // 1. 인원이 꽉 찬 방도 목록에 계속 표시 (`r.current < r.limit` 조건 제거)
+        // 2. 인원이 0명인 방은 목록에서 제외 (`r.current > 0` 조건 추가)
+        raceRoomSnapshot = raceRooms.filter(r => r.status !== 'finished' && r.current > 0).map(r => r.id);
         
         // 2. 내 방 스냅샷: 현재 참가 중인 방
         // [수정] Firestore ID는 문자열이므로 parseInt 제거
@@ -1409,17 +1445,17 @@ function renderRoomLists(refreshSnapshot = false) {
                 raceLi.classList.add('already-joined');
             }
 
-            // [신규] 인원이 가득 찼을 경우 상태 표시 변경 (목록에서 사라지지 않음)
-            const isFull = room.current >= room.limit; // [수정] 서버에서 받아온 room.current를 직접 사용
+            // [FIX] 인원이 가득 찬 방의 상태와 입장 가능 여부를 명확히 처리합니다.
+            const isFull = room.current >= room.limit;
             const statusClass = isFull ? 'finished' : 'inprogress'; 
-            
-            // [신규] 뱃지 지급 가능 방(4인 이상) 표시
             const aggIcon = room.limit >= 4 ? '<img class="agg" src="assets/images/icon_agg.png">' : '';
             const statusText = isFull ? `${aggIcon}마감: ${room.current}/${room.limit}명` : `${aggIcon}모집: ${room.current}/${room.limit}명`;
 
-            // [요청사항 반영] 내가 참가하지 않았고, 인원이 가득 찬 방은 입장 불가 처리
+            // 내가 참가하지 않았고, 인원이 가득 찬 방은 입장 불가 처리
             const isJoinable = !isFull || (isFull && userRoomState);
-            const chevronHtml = `<img class="chevron" src="assets/images/ico128-chevron.png" ${isJoinable ? '' : 'style="opacity: 0.1;"'}/>`;
+            if (!isJoinable) {
+                raceLi.classList.add('disabled');
+            }
 
             raceLi.innerHTML = `
                 <div class="info">
@@ -1432,10 +1468,10 @@ function renderRoomLists(refreshSnapshot = false) {
                     <p>${room.title} ${debugButtonsHTML}</p>
                 </div>
                 ${lockImg}
-                <span class="stat">${chevronHtml}</span>`;
+                <span class="stat"><img class="chevron" src="assets/images/ico128-chevron.png"/></span>`;
 
             raceLi.onclick = () => {
-                // [요청사항 반영] 입장 불가 방 얼럿
+                // 입장 불가 방 클릭 시 알림
                 if (!isJoinable) {
                     alert('인원이 모두 충원되었습니다.');
                     return;
@@ -2092,9 +2128,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     renderMyRecordList();
     renderTop100List();
-    renderRoomLists(true); // [수정] 초기 로드 시 스냅샷 생성
-    listenForRoomUpdates(); // [신규] 실시간 방 목록 감시 시작
+    // [FIX] 페이지네이션 방식으로 첫 페이지 방 목록을 불러옵니다. (기존 onSnapshot 방식 대체)
+    fetchRaceRooms();
 
+    // [신규] 더보기 버튼 이벤트 핸들러
+    const btnLoadMore = document.getElementById('btn-load-more');
+    if (btnLoadMore) btnLoadMore.onclick = () => fetchRaceRooms(true);
+    
     // [신규] 디버깅용 봇 추가/삭제 이벤트 핸들러 (이벤트 위임)
     // [수정] 서버 연동에 따라 Firestore 데이터를 직접 수정하도록 변경
     const handleDebugBotAction = async (e) => {
@@ -2567,7 +2607,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.list-tabgroup .refresh').forEach(btn => {
         btn.onclick = (e) => {
             e.stopPropagation(); // 부모인 탭의 클릭 이벤트가 전파되는 것을 막습니다.
-            renderRoomLists(true); // [수정] 새로고침 버튼 클릭 시 스냅샷 갱신
+            // [FIX] 새로고침 시, 첫 페이지부터 목록을 다시 불러옵니다.
+            fetchRaceRooms(false);
         };
     });
 

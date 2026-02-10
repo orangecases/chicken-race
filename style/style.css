@@ -621,6 +621,11 @@ html, body small{font-size: 70%;}
     background-color: #303534;
 }
 
+/* [신규] 입장 불가(마감) 방의 입장 버튼(chevron) 투명도 조절 */
+.score-list li.disabled .stat .chevron {
+    opacity: 0.1;
+}
+
 /* [신규] 레이스룸 목록에서 이미 참가한 방의 정보 영역을 흐리게 표시 */
 .score-list li.already-joined .info {
     opacity: 0.4;
