@@ -1013,6 +1013,8 @@ async function fetchRaceRooms(loadMore = false) {
 
     try {
         // 참여 가능한 방을 최신순으로 정렬하여 쿼리합니다.
+        // [REVERT] 사용자가 DB의 테스트 데이터를 'createdAt' 필드가 포함되도록 재생성하기로 함에 따라,
+        // 최신순 정렬 기능을 다시 활성화합니다. 이제 새로 생성된 방은 목록 상단에 표시됩니다.
         let query = db.collection('rooms')
             .orderBy('createdAt', 'desc')
             .limit(ROOMS_PER_PAGE);
@@ -2334,7 +2336,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 title: titleInput || "즐거운 레이스",
                 password: passwordInput.length > 0 ? passwordInput : null,
                 maxPlayers: parseInt(limitInput) || 5,
-                currentPlayers: 1,
+                // [FIX] 방 생성 시 봇 1명을 자동으로 추가하여, 생성자가 바로 퇴장해도 방이 사라지지 않도록 합니다.
+                // 참여 인원은 '나 + 봇'이므로 2명으로 시작합니다.
+                currentPlayers: 2,
                 creatorUid: user.uid,
                 attempts: attempts,
                 rankType: rankType,
@@ -2350,7 +2354,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     id: docRef.id,
                     title: roomDataForFirestore.title,
                     limit: roomDataForFirestore.maxPlayers,
-                    current: 1,
+                    // [FIX] 로컬 데이터도 서버와 동일하게 2명으로 시작합니다.
+                    current: 2,
                     attempts: roomDataForFirestore.attempts,
                     status: "inprogress",
                     rankType: roomDataForFirestore.rankType,
