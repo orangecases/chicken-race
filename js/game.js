@@ -1759,6 +1759,36 @@ async function deleteCurrentRoom() {
 }
 
 /**
+ * [FIX] '참가중인 목록'에서 현재 방을 제거합니다. (DB에서 방을 삭제하지 않음)
+ * 기존 deleteCurrentRoom은 방 자체를 DB에서 삭제하여 모든 참가자에게 영향을 주는 버그가 있었습니다.
+ * 이 함수는 현재 로그인한 유저의 '참가 목록'에서만 방을 제거합니다.
+ */
+function removeFromMyRooms() {
+    if (!currentRoom || !currentRoom.id || !currentUser || !currentUser.joinedRooms) {
+        console.warn("목록에서 제거할 방 정보가 없습니다. 로비로 이동합니다.");
+        exitToLobby();
+        return;
+    }
+
+    const roomId = currentRoom.id;
+
+    // 1. 로컬 currentUser 객체에서 해당 방 정보를 제거합니다.
+    delete currentUser.joinedRooms[roomId];
+    console.log(`✅ 로컬 '참가중' 목록에서 방 [${roomId}] 제거 완료.`);
+
+    // 2. 변경된 유저 정보를 서버에 저장하여 '참가중' 목록을 영구적으로 업데이트합니다.
+    saveUserDataToFirestore().then(() => {
+        console.log(`✅ 서버에 '참가중' 목록 변경사항 저장 완료.`);
+        // 3. 저장이 완료된 후 로비로 이동합니다.
+        currentRoom = null; // exitToLobby에서 불필요한 로직을 수행하지 않도록 초기화
+        exitToLobby();
+    }).catch(error => {
+        console.error(`❌ '참가중' 목록 업데이트 실패:`, error);
+        alert("목록에서 방을 제거하는 중 오류가 발생했습니다.");
+    });
+}
+
+/**
  * [신규] 광고 데이터(오늘 시청 횟수)를 가져오고 날짜를 체크합니다.
  */
 function getAdData() {
@@ -2353,9 +2383,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnDeleteRoomConfirm) {
         btnDeleteRoomConfirm.onclick = () => {
             if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.add('hidden');
-            // [수정] Firestore 연동을 위해 async 함수로 변경되었으므로 호출 방식을 맞춥니다.
-            // 이 함수는 에러를 내부에서 처리하므로 await 없이 호출해도 무방합니다.
-            deleteCurrentRoom();
+            // [FIX] '참가중인 목록에서 삭제'는 DB의 방을 삭제하는 것이 아니라,
+            // 내 유저 정보(joinedRooms)에서 해당 방 ID만 제거하는 기능입니다.
+            // 따라서 DB의 방을 직접 삭제하는 deleteCurrentRoom 대신 removeFromMyRooms를 호출합니다.
+            removeFromMyRooms();
         };
     }
     if (btnDeleteRoomCancel) {
