@@ -1149,24 +1149,28 @@ async function exitToLobby() { // Make exitToLobby async
             clearAutoActionTimer();
 
             // [FIX] 게임 시작 전 퇴장 시, 트랜잭션을 사용하여 안전하게 인원수를 감소시키고, 0명이 되면 방을 자동 삭제합니다.
-            // 이 방식은 여러 사용자가 동시에 나가는 경우에도 데이터 정합성을 보장합니다.
+            // [FIX] 트랜잭션을 await하여 서버 업데이트가 완료된 후 목록을 갱신하도록 보장합니다.
+            // 기존에는 await가 없어 서버 데이터가 갱신되기 전에 목록을 불러와(fetchRaceRooms) 인원수가 줄어들지 않은 상태로 표시되었습니다.
             const roomRef = db.collection('rooms').doc(currentRoom.id);
-            db.runTransaction(async (transaction) => {
-                const roomDoc = await transaction.get(roomRef);
-                if (!roomDoc.exists) { return; } // 방이 이미 삭제된 경우
+            
+            try {
+                await db.runTransaction(async (transaction) => {
+                    const roomDoc = await transaction.get(roomRef);
+                    if (!roomDoc.exists) { return; } // 방이 이미 삭제된 경우
 
-                const currentData = roomDoc.data();
-                const newPlayerCount = currentData.currentPlayers - 1;
+                    const currentData = roomDoc.data();
+                    const newPlayerCount = currentData.currentPlayers - 1;
 
-                if (newPlayerCount <= 0) {
-                    // 마지막 플레이어가 나갔으므로 방을 삭제합니다.
-                    transaction.delete(roomRef);
-                    console.log(`✅ 방 [${currentRoom.id}]의 마지막 참가자가 퇴장하여 방을 자동으로 삭제합니다.`);
-                } else {
-                    // 아직 플레이어가 남아있으므로 인원수만 감소시킵니다.
-                    transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
-                }
-            }).then(() => {
+                    if (newPlayerCount <= 0) {
+                        // 마지막 플레이어가 나갔으므로 방을 삭제합니다.
+                        transaction.delete(roomRef);
+                        console.log(`✅ 방 [${currentRoom.id}]의 마지막 참가자가 퇴장하여 방을 자동으로 삭제합니다.`);
+                    } else {
+                        // 아직 플레이어가 남아있으므로 인원수만 감소시킵니다.
+                        transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
+                    }
+                });
+
                 console.log(`✅ 방 [${currentRoom.id}] 퇴장. 서버 인원 수 감소.`);
                 // [FIX] 퇴장 후 로컬 데이터 동기화 (목록 인원수 불일치 문제 해결)
                 if (currentUser && currentUser.joinedRooms[currentRoom.id]) {
@@ -1186,9 +1190,9 @@ async function exitToLobby() { // Make exitToLobby async
                         }
                     }
                 }
-            }).catch(error => {
+            } catch (error) {
                 console.error("❌ 방 퇴장 시 인원 수 업데이트 실패:", error);
-            });
+            }
             
             // [신규] 게임 시작 전(대기 상태) 퇴장 시 코인 환불 로직
             if (currentUser) {
@@ -2665,7 +2669,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     // [수정] 레이스룸/참가중 탭 전환 시에는 renderRoomLists 함수를 콜백으로 전달하여 목록을 새로고침합니다.
-    initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', () => renderRoomLists(true));
+    initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', () => {
+        renderRoomLists(true);
+        fetchRaceRooms(false); // [FIX] 탭 전환 시 서버 데이터 갱신
+    });
     
     // [수정] Top 100 탭 클릭 시 서버에서 랭킹 불러오기
     initTabs('tab-my-record', 'tab-top-100', 'content-my-record', 'content-top-100', () => {
