@@ -1209,18 +1209,36 @@ async function attemptToJoinRoom(room) {
 
     const hasJoined = currentUser && currentUser.joinedRooms && currentUser.joinedRooms[room.id];
 
+    // [FIX] 봇 추가/삭제(+/-) 버튼을 누른 직후 입장/재입장 시, 클라이언트의 방 정보(인원 수)가
+    // 서버와 일치하지 않는 상태(Stale)에서 진입하여 플레이어 수가 맞지 않는 문제를 해결합니다.
+    // 원인: onSnapshot의 비동기적 업데이트 지연으로 인해, stale 데이터로 게임 씬에 진입함.
+    // 해결: 입장/재입장 시 항상 서버로부터 최신 방 정보를 가져와 로컬 데이터를 갱신한 후 진입합니다.
+
     if (hasJoined) {
+        // --- 재입장 ---
+        // 서버에서 최신 인원 수를 가져와 로컬 room 객체를 갱신합니다.
+        const roomRef = db.collection('rooms').doc(room.id);
+        try {
+            const roomDoc = await roomRef.get();
+            if (roomDoc.exists) {
+                const serverData = roomDoc.data();
+                room.current = serverData.currentPlayers;
+                room.status = serverData.status;
+            }
+        } catch (error) {
+            console.error("❌ 재입장 시 방 정보 갱신 실패:", error);
+        }
         enterGameScene('multi', room);
         return;
     }
 
+    // --- 신규 입장 ---
     const cost = room.attempts;
     if (currentUser.coins < cost) {
         alert(`코인이 부족합니다. (필요: ${cost}, 보유: ${currentUser.coins})`);
         return;
     }
     
-    // [수정] Firestore 트랜잭션을 사용하여 안전하게 인원 수를 증가시키고 입장 처리합니다.
     const roomRef = db.collection('rooms').doc(room.id);
     try {
         await db.runTransaction(async (transaction) => {
@@ -1228,18 +1246,17 @@ async function attemptToJoinRoom(room) {
             if (!roomDoc.exists) { throw "존재하지 않는 방입니다."; }
 
             const serverRoomData = roomDoc.data();
-            // 2. 만약 currentPlayers가 maxPlayers와 같거나 크다면 입장을 차단합니다.
             if (serverRoomData.currentPlayers >= serverRoomData.maxPlayers) { throw "방이 가득 찼습니다."; }
 
-            // 3. (고급) FieldValue.increment(1)을 사용해서 동시 접속 충돌을 방지하며 인원수를 1 증가시킵니다.
+            // [FIX] 트랜잭션 내에서 최신 인원 수를 로컬 room 객체에 먼저 반영합니다.
+            room.current = serverRoomData.currentPlayers;
+
             transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
         });
 
         console.log(`✅ 방 [${room.id}] 입장 트랜잭션 성공. 인원 수 증가.`);
 
-        // [FIX] 로컬 room 객체의 인원수를 즉시 증가시켜, onSnapshot의 비동기 지연으로 인해
-        // enterGameScene에서 봇 생성 시 인원수가 맞지 않는 문제를 해결합니다.
-        // onSnapshot이 실행되면 이 값은 서버 값으로 다시 덮어쓰여져 일관성이 유지됩니다.
+        // [FIX] 트랜잭션 성공 후, 입장하는 '나'를 포함하여 로컬 인원 수를 1 증가시킵니다.
         room.current++;
 
         // 다른 '미시작' 방에서 자동으로 나가고 코인 환불
