@@ -1159,6 +1159,24 @@ function exitToLobby() {
                 }
             }).then(() => {
                 console.log(`✅ 방 [${currentRoom.id}] 퇴장. 서버 인원 수 감소.`);
+                // [FIX] 퇴장 후 로컬 데이터 동기화 (목록 인원수 불일치 문제 해결)
+                if (currentUser && currentUser.joinedRooms[currentRoom.id]) {
+                    const roomId = currentRoom.id;
+                    // 1. 유저의 참가 목록에서 방 제거 (로컬 + 서버)
+                    delete currentUser.joinedRooms[roomId];
+                    db.collection("users").doc(currentUser.id).update({
+                        [`joinedRooms.${roomId}`]: firebase.firestore.FieldValue.delete()
+                    }).catch(error => console.error("❌ 참가 목록에서 방 제거 실패:", error));
+            
+                    // 2. 로컬 방 목록(raceRooms) 인원 수 갱신
+                    const roomInList = raceRooms.find(r => r.id === roomId);
+                    if (roomInList) {
+                        roomInList.current--;
+                        if (roomInList.current <= 0) {
+                            raceRooms = raceRooms.filter(r => r.id !== roomId);
+                        }
+                    }
+                }
             }).catch(error => {
                 console.error("❌ 방 퇴장 시 인원 수 업데이트 실패:", error);
             });
@@ -1608,10 +1626,12 @@ function enterGameScene(mode, roomData = null) {
         // [FIX] 플레이어 생성 로직을 서버 데이터 기준으로 재구성합니다.
         // 1. 캐시가 없거나, 캐시의 인원수가 서버의 인원수와 다르면 캐시를 새로 생성합니다.
         //    (서버 인원수는 내가 방금 입장한 것이 반영된 최신 값입니다)
-        const cacheIsInvalid = !roomPlayersCache[currentRoom.id] || roomPlayersCache[currentRoom.id].length !== currentRoom.current;
+        // [FIX] 입장 시마다 플레이어 목록을 항상 새로 구성하여 데이터 정합성을 보장합니다.
+        // stale 캐시 데이터로 인해 발생하는 인원수 불일치 및 봇 누락 문제를 해결합니다.
+        const cacheIsInvalid = true;
 
         if (cacheIsInvalid) {
-            console.log("캐시가 유효하지 않거나 없습니다. 서버 데이터 기준으로 새로 생성합니다.");
+            console.log("플레이어 목록을 서버 데이터 기준으로 새로 구성합니다.");
 
             // 1a. '나'의 플레이어 객체를 생성합니다.
             const cachedScores = playerScoresCache[`${currentRoom.id}-${myPlayerId}`] || { totalScore: 0, bestScore: 0 };
@@ -2050,8 +2070,8 @@ function loadUserData(user) {
             if (sceneAuth) sceneAuth.classList.add('hidden');
             
             updateCoinUI();
-            renderRoomLists(true);
-            
+            // [FIX] 로그인 시에도 fetchRaceRooms()를 호출하여 데이터 로딩과 UI 렌더링 순서를 보장합니다.
+            fetchRaceRooms(false);
             // 프로필 모달이 열려있다면 갱신
             const sceneUserProfile = document.getElementById('scene-user-profile');
             if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
@@ -2115,7 +2135,11 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // UI 업데이트
             updateCoinUI(); // 게스트 코인으로 UI 업데이트
-            renderRoomLists(true); // 로그아웃 상태의 방 목록으로 갱신
+            // [FIX] F5 새로고침 또는 탭 전환 시 목록이 사라지는 문제를 해결합니다.
+            // 원인: 로그인 상태 변경 시, 방 목록 데이터(raceRooms)를 다시 가져오지 않고
+            //       UI 렌더링 함수(renderRoomLists)만 호출하여, 비어있는 데이터로 목록이 그려지는 레이스 컨디션이 있었습니다.
+            // 해결: 로그인/로그아웃 시 항상 fetchRaceRooms()를 호출하여 데이터를 먼저 가져온 후 UI를 그리도록 순서를 보장합니다.
+            fetchRaceRooms(false);
             
             // 열려있을 수 있는 프로필 모달 닫기
             const sceneUserProfile = document.getElementById('scene-user-profile');
@@ -2134,8 +2158,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     renderMyRecordList();
     renderTop100List();
-    // [FIX] 페이지네이션 방식으로 첫 페이지 방 목록을 불러옵니다. (기존 onSnapshot 방식 대체)
-    fetchRaceRooms();
+    // [FIX] fetchRaceRooms() 호출을 onAuthStateChanged 내부로 이동하여,
+    // 로그인 상태가 확정된 후에 방 목록을 불러오도록 수정합니다.
 
     // [신규] 더보기 버튼 이벤트 핸들러
     const btnLoadMore = document.getElementById('btn-load-more');
