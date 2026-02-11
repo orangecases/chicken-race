@@ -2275,33 +2275,37 @@ async function saveUserDataToFirestore() {
 
 document.addEventListener('DOMContentLoaded', () => {
     // [신규] Firebase 인증 상태 변경 감지 리스너
+    // [FIX] 페이지 로딩 시 발생하는 경쟁 상태(Race Condition) 오류를 막기 위해 setTimeout으로 감싸줍니다.
+    // 이렇게 하면 내부 코드가 DOM 렌더링 및 다른 스크립트 초기화가 끝난 후 실행되는 것을 보장할 수 있습니다.
     firebase.auth().onAuthStateChanged((user) => {
-        if (user) {
-            // User is signed in.
-            loadUserData(user);
-        } else {
-            // User is signed out.
-            if (unsubscribeUserData) {
-                unsubscribeUserData();
-                unsubscribeUserData = null;
+        setTimeout(() => {
+            if (user) {
+                // User is signed in.
+                loadUserData(user);
+            } else {
+                // User is signed out.
+                if (unsubscribeUserData) {
+                    unsubscribeUserData();
+                    unsubscribeUserData = null;
+                }
+                isLoggedIn = false;
+                currentUser = null;
+                console.log("❓ 로그아웃 상태");
+                
+                // UI 업데이트
+                updateCoinUI(); // 게스트 코인으로 UI 업데이트
+                // [FIX] F5 새로고침 또는 탭 전환 시 목록이 사라지는 문제를 해결합니다.
+                // 원인: 로그인 상태 변경 시, 방 목록 데이터(raceRooms)를 다시 가져오지 않고
+                //       UI 렌더링 함수(renderRoomLists)만 호출하여, 비어있는 데이터로 목록이 그려지는 레이스 컨디션이 있었습니다.
+                // 해결: 로그인/로그아웃 시 항상 fetchRaceRooms()를 호출하여 데이터를 먼저 가져온 후 UI를 그리도록 순서를 보장합니다.
+                fetchRaceRooms(false);
+                fetchMyRooms(); // [신규] 내 방 목록도 갱신 (비움)
+                
+                // 열려있을 수 있는 프로필 모달 닫기
+                const sceneUserProfile = document.getElementById('scene-user-profile');
+                if (sceneUserProfile) sceneUserProfile.classList.add('hidden');
             }
-            isLoggedIn = false;
-            currentUser = null;
-            console.log("❓ 로그아웃 상태");
-            
-            // UI 업데이트
-            updateCoinUI(); // 게스트 코인으로 UI 업데이트
-            // [FIX] F5 새로고침 또는 탭 전환 시 목록이 사라지는 문제를 해결합니다.
-            // 원인: 로그인 상태 변경 시, 방 목록 데이터(raceRooms)를 다시 가져오지 않고
-            //       UI 렌더링 함수(renderRoomLists)만 호출하여, 비어있는 데이터로 목록이 그려지는 레이스 컨디션이 있었습니다.
-            // 해결: 로그인/로그아웃 시 항상 fetchRaceRooms()를 호출하여 데이터를 먼저 가져온 후 UI를 그리도록 순서를 보장합니다.
-            fetchRaceRooms(false);
-            fetchMyRooms(); // [신규] 내 방 목록도 갱신 (비움)
-            
-            // 열려있을 수 있는 프로필 모달 닫기
-            const sceneUserProfile = document.getElementById('scene-user-profile');
-            if (sceneUserProfile) sceneUserProfile.classList.add('hidden');
-        }
+        }, 0);
     });
 
     // [신규] 기록 로드 및 렌더링
