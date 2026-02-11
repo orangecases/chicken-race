@@ -2333,12 +2333,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         console.warn(`[Debug] 방 [${roomId}]이(가) 가득 찼습니다.`);
                     }
                 } else if (action === 'remove') {
-                    if (data.currentPlayers > 0) {
-                        finalCount = data.currentPlayers - 1;
-                        transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
+                    finalCount = data.currentPlayers - 1;
+                    if (finalCount <= 0) {
+                        // 참가 인원이 0명이 되므로 방을 삭제합니다.
+                        finalCount = 0; // UI 업데이트를 위해 0으로 설정
+                        transaction.delete(roomRef);
+                        console.log(`[Debug] 방 [${roomId}]의 인원수가 0이 되어 자동으로 삭제합니다.`);
                     } else {
-                        finalCount = data.currentPlayers;
-                        console.warn(`[Debug] 방 [${roomId}]은(는) 이미 비어있습니다.`);
+                        // 아직 참가 인원이 있으면 숫자만 감소시킵니다.
+                        transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
                     }
                 }
             });
