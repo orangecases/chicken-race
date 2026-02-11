@@ -1941,7 +1941,7 @@ function handleHomeButtonClick() {
         const sceneExitConfirm = document.getElementById('scene-exit-confirm');
         if (sceneExitConfirm) sceneExitConfirm.classList.remove('hidden');
     } else {
-        // 그 외(시작 전 대기, 완전 게임 오버 등)는 즉시 이동
+        // 그 외(시작 전 대기, 완전 게임 오버 등)는 즉시 이동 하기
         exitToLobby();
     }
 }
