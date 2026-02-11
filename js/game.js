@@ -1694,7 +1694,7 @@ function renderRoomLists(refreshSnapshot = false) {
     }
 }
 
-function enterGameScene(mode, roomData = null) {
+async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함수로 변경
     if (!isGameReady) { alert("리소스 로딩 중!"); return; }
 
     // [신규] 멀티플레이 회원 전용 체크 강화
@@ -1751,55 +1751,81 @@ function enterGameScene(mode, roomData = null) {
 
     // --- 멀티플레이어 모드 로직 ---
     if (mode === 'multi') {
-        // [수정] 사용자별 시도 횟수 정보를 가져옵니다.
-        const userRoomState = currentUser.joinedRooms[currentRoom.id];
-        const userUsedAttempts = userRoomState ? userRoomState.usedAttempts : 0;
-        const myPlayerId = currentUser ? currentUser.id : 'me';
+        // [1단계] 방 입장 시 참가자(나 + 봇)를 Firestore에 등록하고, 로컬 플레이어 목록을 구성합니다.
+        // Firestore를 '단일 진실 공급원(Single Source of Truth)'으로 사용합니다.
+        const myPlayerId = currentUser.id;
+        const roomRef = db.collection('rooms').doc(currentRoom.id);
+        const participantsRef = roomRef.collection('participants');
 
-        // [FIX] 플레이어 생성 로직을 서버 데이터 기준으로 재구성합니다.
-        // 1. 캐시가 없거나, 캐시의 인원수가 서버의 인원수와 다르면 캐시를 새로 생성합니다.
-        //    (서버 인원수는 내가 방금 입장한 것이 반영된 최신 값입니다)
-        // [FIX] 입장 시마다 플레이어 목록을 항상 새로 구성하여 데이터 정합성을 보장합니다.
-        // stale 캐시 데이터로 인해 발생하는 인원수 불일치 및 봇 누락 문제를 해결합니다.
-        const cacheIsInvalid = true;
+        try {
+            // 트랜잭션을 사용하여 여러 사용자가 동시에 입장/등록할 때 데이터 정합성을 보장합니다.
+            await db.runTransaction(async (transaction) => {
+                // 1. 방의 최신 정보를 가져와 목표 인원 수를 확인합니다.
+                const roomDoc = await transaction.get(roomRef);
+                if (!roomDoc.exists) throw "존재하지 않는 방입니다.";
+                const roomData = roomDoc.data();
+                const targetPlayerCount = roomData.currentPlayers;
 
-        if (cacheIsInvalid) {
-            console.log("플레이어 목록을 서버 데이터 기준으로 새로 구성합니다.");
+                // 2. 현재 참가자 목록을 가져옵니다.
+                const participantsSnapshot = await transaction.get(participantsRef);
+                const existingParticipants = participantsSnapshot.docs.map(doc => doc.data());
 
-            // 1a. '나'의 플레이어 객체를 생성합니다.
-            const cachedScores = playerScoresCache[`${currentRoom.id}-${myPlayerId}`] || { totalScore: 0, bestScore: 0 };
-            const myPlayerInRoom = { 
-                id: myPlayerId, 
-                name: currentUser ? currentUser.nickname : '나', 
-                score: 0, 
-                totalScore: cachedScores.totalScore, bestScore: cachedScores.bestScore, 
-                status: 'waiting', 
-                attemptsLeft: currentRoom.attempts
-            };
+                // 3. '나'의 정보를 참가자 목록에 추가/업데이트합니다.
+                const myParticipantData = {
+                    id: myPlayerId,
+                    name: currentUser.nickname,
+                    isBot: false,
+                    totalScore: 0,
+                    bestScore: 0,
+                    status: 'waiting' // 3. 모든 참가자의 초기 상태는 'waiting'으로 설정
+                };
+                // 참고: 재입장 시 점수가 0으로 초기화되지 않도록,
+                // 실제로는 기존 점수 정보를 읽어와서 유지해야 합니다. (2단계에서 구현 예정)
+                const myDocRef = participantsRef.doc(myPlayerId);
+                transaction.set(myDocRef, myParticipantData, { merge: true }); // 1. 유저 정보 등록 (없으면 생성, 있으면 업데이트)
 
-            // 1b. '나'를 제외한 나머지 인원수만큼 봇을 생성합니다.
-            const botCount = Math.max(0, currentRoom.current - 1);
-            const bots = [];
-            const botNames = ['고수치킨', '초보닭', '구경꾼', '치킨런', '달려라하니', '양념반후라이드반', '파닭파닭', '치맥사랑', 'KFC할아버지'];
-            for (let i = 0; i < botCount; i++) {
-                bots.push({ 
-                    id: `bot_initial_${i}`, 
-                    name: botNames[i % botNames.length], 
-                    score: 0, totalScore: 0, bestScore: 0, 
-                    status: 'waiting', attemptsLeft: currentRoom.attempts,
-                    startDelay: Math.floor(Math.random() * 120) + 60, targetScore: 1500 + Math.floor(Math.random() * 3000), speedFactor: 1, changeTimer: 0
-                });
-            }
-            
-            // 1c. 캐시를 '나'와 생성된 봇들로 완전히 교체합니다.
-            roomPlayersCache[currentRoom.id] = [myPlayerInRoom, ...bots];
+                // 4. 필요한 경우 봇을 추가합니다. (목표 인원 수에 도달하도록)
+                const amINew = !existingParticipants.some(p => p.id === myPlayerId);
+                const finalParticipantCount = existingParticipants.length + (amINew ? 1 : 0);
+                const botsToCreate = targetPlayerCount - finalParticipantCount;
+
+                if (botsToCreate > 0) {
+                    console.log(`[Transaction] 목표 인원(${targetPlayerCount})을 맞추기 위해 봇 ${botsToCreate}명을 추가합니다.`);
+                    const botNames = ['고수치킨', '초보닭', '구경꾼', '치킨런', '달려라하니', '양념반후라이드반', '파닭파닭', '치맥사랑', 'KFC할아버지'];
+                    for (let i = 0; i < botsToCreate; i++) {
+                        const botId = `bot_${Date.now()}_${i}`;
+                        const botData = {
+                            id: botId,
+                            name: botNames[(finalParticipantCount + i) % botNames.length],
+                            isBot: true,
+                            totalScore: 0,
+                            bestScore: 0,
+                            status: 'waiting', // 3. 모든 참가자의 초기 상태는 'waiting'으로 설정
+                            startDelay: Math.floor(Math.random() * 120) + 60,
+                            targetScore: 1500 + Math.floor(Math.random() * 3000),
+                            speedFactor: 1,
+                            changeTimer: 0
+                        };
+                        const botDocRef = participantsRef.doc(botId);
+                        transaction.set(botDocRef, botData); // 2. 봇 정보 등록
+                    }
+                }
+            });
+
+            // 트랜잭션 성공 후, 최신 참가자 목록 전체를 불러와 multiGamePlayers 배열을 구성합니다.
+            const finalParticipantsSnapshot = await participantsRef.get();
+            multiGamePlayers = finalParticipantsSnapshot.docs.map(doc => doc.data());
+
+        } catch (error) {
+            console.error("❌ 참가자 등록 또는 목록 로딩 실패:", error);
+            alert("방에 참가하는 중 오류가 발생했습니다. 로비로 돌아갑니다.");
+            exitToLobby();
+            return;
         }
 
-        // 2. 이제 캐시는 최신 상태이므로, 이를 기준으로 게임을 시작합니다.
-        multiGamePlayers = roomPlayersCache[currentRoom.id];
-        saveRoomStates(); // 변경된 캐시를 localStorage에 저장합니다.
-
-        const myPlayerInRoom = multiGamePlayers.find(p => p.id === myPlayerId);
+        const userRoomState = currentUser.joinedRooms[currentRoom.id];
+        const userUsedAttempts = userRoomState ? userRoomState.usedAttempts : 0;
+        const myPlayerInRoom = multiGamePlayers.find(p => p.id === myPlayerId); // 이제 myPlayerId는 항상 currentUser.id 입니다.
 
         // [FIX] 게임 완료(모든 기회 소진) 또는 방 종료 시 재입장하면 '시작' 화면이 뜨는 버그 수정
         // 원인: 1. 방이 종료('finished')되었거나 내 모든 기회를 소진했음에도, 조건문 로직의 문제로 시작 화면이 표시될 수 있었습니다.
