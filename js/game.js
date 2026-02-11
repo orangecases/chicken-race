@@ -1100,11 +1100,24 @@ async function fetchMyRooms() {
         return;
     }
 
-    // Firestore 'in' 쿼리는 최대 10개까지만 가능하므로 상위 10개만 우선 조회
-    const idsChunk = roomIds.slice(0, 10);
+    // [수정] currentMyRoomLimit 만큼 ID를 가져옵니다.
+    const targetIds = roomIds.slice(0, currentMyRoomLimit);
+    
+    // [수정] Firestore 'in' 쿼리는 최대 10개 제한이 있으므로, 10개씩 끊어서 요청합니다.
+    const chunks = [];
+    for (let i = 0; i < targetIds.length; i += 10) {
+        chunks.push(targetIds.slice(i, i + 10));
+    }
+
     try {
-        const q = await db.collection('rooms').where(firebase.firestore.FieldPath.documentId(), 'in', idsChunk).get();
-        myRooms = q.docs.map(doc => mapFirestoreDocToRoom(doc));
+        const promises = chunks.map(chunk => db.collection('rooms').where(firebase.firestore.FieldPath.documentId(), 'in', chunk).get());
+        const snapshots = await Promise.all(promises);
+        
+        myRooms = [];
+        snapshots.forEach(snap => {
+            snap.docs.forEach(doc => myRooms.push(mapFirestoreDocToRoom(doc)));
+        });
+        
         renderRoomLists(true);
     } catch (e) {
         console.error("❌ 내 방 목록 로드 실패:", e);
@@ -1574,6 +1587,8 @@ function renderRoomLists(refreshSnapshot = false) {
             // [신규] 디버깅용 봇 추가/삭제 버튼 HTML
             const debugButtonsHTML = `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`;
 
+            // [FIX] userUsedAttempts 변수가 정의되지 않아 렌더링이 중단되는 오류 수정
+            const userUsedAttempts = userRoomState.usedAttempts;
             const isMyPlayFinished = userUsedAttempts >= room.attempts;
             const isRoomGloballyFinished = room.status === "finished";
             const isRoomFull = room.current >= room.limit;
