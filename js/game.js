@@ -38,6 +38,7 @@ let displayedMyRecordsCount = 20; // [신규] 내 기록 표시 개수 (무한 �
 let lastVisibleRoomDoc = null; // 마지막으로 불러온 방의 문서 참조
 let isFetchingRooms = false;   // 방 목록을 불러오는 중인지 여부 (중복 호출 방지)
 let currentRoomLimit = 10;     // [신규] 현재 불러올 방의 개수 (limit)
+let currentMyRoomLimit = 10;   // [신규] 참가중 탭의 목록 노출 개수 (limit)
 let unsubscribeRoomListener = null; // [신규] 실시간 리스너 해제 함수
 const ROOMS_PER_PAGE = 10;     // 한 번에 불러올 방의 개수
 let allRoomsLoaded = false;    // 모든 방을 다 불러왔는지 여부 (더보기 버튼 표시 제어)
@@ -1038,6 +1039,7 @@ function fetchRaceRooms(loadMore = false) {
 
         // [핵심] get() 대신 onSnapshot()을 사용하여 실시간 데이터 동기화
         unsubscribeRoomListener = db.collection('rooms')
+            .where('status', '==', 'inprogress') // [수정] 진행 중인 방만 가져와서 목록 개수 유지 (복합 인덱스 필요)
             .orderBy('createdAt', 'desc')
             .limit(currentRoomLimit)
             .onSnapshot((querySnapshot) => {
@@ -1458,12 +1460,15 @@ function renderRoomLists(refreshSnapshot = false) {
     if (refreshSnapshot) {
         // [FIX] 레이스룸 스냅샷 필터링 규칙 변경
         // 1. 인원이 꽉 찬 방은 목록에서 제외 (`r.current < r.limit` 조건 추가)
-        // 2. 인원이 0명인 방은 목록에서 제외 (`r.current > 0` 조건 추가)
-        raceRoomSnapshot = raceRooms.filter(r => r.status !== 'finished' && r.current > 0 && r.current < r.limit).map(r => r.id);
+        // [수정] 꽉 찬 방도 목록에 노출하되 입장을 막는 방식으로 변경하여, 불러온 10개가 모두 보이도록 함 (`r.current < r.limit` 제거)
+        // status !== 'finished'는 서버 쿼리에서 이미 걸러지지만 안전장치로 유지
+        raceRoomSnapshot = raceRooms.filter(r => r.status !== 'finished' && r.current > 0).map(r => r.id);
         
         // 2. 내 방 스냅샷: 현재 참가 중인 방
         // [수정] Firestore ID는 문자열이므로 parseInt 제거
-        myRoomSnapshot = (isLoggedIn && currentUser && currentUser.joinedRooms) ? Object.keys(currentUser.joinedRooms) : [];
+        // [수정] 참가중 목록도 10개씩 끊어서 노출 (페이지네이션)
+        const allMyRooms = (isLoggedIn && currentUser && currentUser.joinedRooms) ? Object.keys(currentUser.joinedRooms) : [];
+        myRoomSnapshot = allMyRooms.slice(0, currentMyRoomLimit);
     }
 
     raceRoomList.innerHTML = '';
@@ -1594,6 +1599,24 @@ function renderRoomLists(refreshSnapshot = false) {
         myRoomList.innerHTML = '<li><div class="info" style="text-align:center; width:100%;"><p>로그인 후 이용 가능합니다.</p></div></li>';
     } else if (myRoomList.children.length === 0) {
         myRoomList.innerHTML = '<li><div class="info" style="text-align:center; width:100%;"><p>참가중인 레이스룸이 없습니다.</p></div></li>';
+    }
+
+    // [신규] 탭 상태에 따라 '더보기' 버튼(로더) 표시 여부 제어
+    const loader = document.getElementById('race-room-loader');
+    const tabRaceRoom = document.getElementById('tab-race-room');
+    const isRaceTabActive = tabRaceRoom && tabRaceRoom.classList.contains('active');
+
+    if (loader) {
+        if (isRaceTabActive) {
+            // 레이스룸 탭: fetchRaceRooms에서 설정한 allRoomsLoaded 상태 따름
+            if (allRoomsLoaded) loader.classList.add('hidden');
+            else loader.classList.remove('hidden');
+        } else {
+            // 참가중 탭: 전체 개수와 현재 노출 개수 비교
+            const totalMyRooms = (isLoggedIn && currentUser && currentUser.joinedRooms) ? Object.keys(currentUser.joinedRooms).length : 0;
+            if (totalMyRooms > currentMyRoomLimit) loader.classList.remove('hidden');
+            else loader.classList.add('hidden');
+        }
     }
 }
 
@@ -2183,9 +2206,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // [FIX] fetchRaceRooms() 호출을 onAuthStateChanged 내부로 이동하여,
     // 로그인 상태가 확정된 후에 방 목록을 불러오도록 수정합니다.
 
-    // [신규] 더보기 버튼 이벤트 핸들러
+    // [신규] 더보기 버튼 이벤트 핸들러 (탭 구분)
     const btnLoadMore = document.getElementById('btn-load-more');
-    if (btnLoadMore) btnLoadMore.onclick = () => fetchRaceRooms(true);
+    if (btnLoadMore) {
+        btnLoadMore.onclick = () => {
+            const tabRaceRoom = document.getElementById('tab-race-room');
+            if (tabRaceRoom && tabRaceRoom.classList.contains('active')) {
+                fetchRaceRooms(true);
+            } else {
+                // 참가중 탭 더보기
+                currentMyRoomLimit += 10;
+                renderRoomLists(true); // 스냅샷 갱신 필요
+            }
+        };
+    }
     
     // [신규] 디버깅용 봇 추가/삭제 이벤트 핸들러 (이벤트 위임)
     // [수정] 서버 연동에 따라 Firestore 데이터를 직접 수정하도록 변경
