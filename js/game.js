@@ -29,6 +29,8 @@ let unsubscribeUserData = null; // [신규] 유저 데이터 리스너 해제 �
 let multiGamePlayers = []; // [신규] 멀티플레이 참여자 목록
 let unsubscribeParticipantsListener = null; // [신규] 멀티플레이 참가자 실시간 리스너
 let autoActionTimer = null; // [신규] 자동 액션 타이머
+let lastFirestoreUpdateTime = 0; // [3단계] Firestore 업데이트 쓰로틀링용
+const FIRESTORE_UPDATE_INTERVAL = 1000; // [3단계] 1초 간격으로 업데이트
 let isJumpPressed = false; // [신규] 점프 버튼 누름 상태 유지 변수
 let displayedMyRecordsCount = 20; // [신규] 내 기록 표시 개수 (무한 스크롤용)
 
@@ -669,6 +671,92 @@ function handleGameOverUI() {
     renderMultiRanking(); // [신규] 게임 오버 시 랭킹 즉시 갱신
 }
 
+/**
+ * [3단계] 멀티플레이 게임 상태를 실시간으로 처리하고 Firestore와 동기화합니다.
+ * 이 함수는 gameLoop 내에서 호출됩니다.
+ */
+function handleMultiplayerTick() {
+    if (currentGameMode !== 'multi' || !currentRoom || !currentUser) return;
+
+    // 1. 최종 결과가 확정된 방은 더 이상 업데이트하지 않습니다.
+    if (currentRoom.status === 'finished') return;
+
+    const now = Date.now();
+    const myId = currentUser.id;
+    const isHost = currentUser.id === currentRoom.creatorUid;
+    const participantsRef = db.collection('rooms').doc(currentRoom.id).collection('participants');
+
+    // 2. 플레이어 자신의 로컬 점수를 즉시 업데이트합니다. (UI 반응성용)
+    const myPlayer = multiGamePlayers.find(p => p.id === myId);
+    if (myPlayer && gameState === STATE.PLAYING) {
+        myPlayer.score = score;
+    }
+
+    // 3. Firestore 업데이트 (쓰로틀링 적용)
+    if (now - lastFirestoreUpdateTime > FIRESTORE_UPDATE_INTERVAL) {
+        lastFirestoreUpdateTime = now;
+        const batch = db.batch();
+
+        // 3a. 내 정보 업데이트 (내가 플레이 중일 때만)
+        if (myPlayer && myPlayer.status === 'playing') {
+            const myDocRef = participantsRef.doc(myId);
+            const displayScore = (currentRoom.rankType === 'total')
+                ? (myPlayer.totalScore || 0) + myPlayer.score
+                : Math.max((myPlayer.bestScore || 0), myPlayer.score);
+            
+            batch.update(myDocRef, {
+                displayScore: Math.floor(displayScore),
+                status: 'playing'
+            });
+        }
+
+        // 3b. 봇 정보 업데이트 (방장만 수행)
+        if (isHost) {
+            multiGamePlayers.forEach(p => {
+                if (!p.isBot || p.status === 'dead') return;
+
+                if (p.status === 'waiting') {
+                    p.startDelay = (p.startDelay || 0) - (FIRESTORE_UPDATE_INTERVAL / 16.67); // 1초에 약 60프레임 감소
+                    if (p.startDelay <= 0) p.status = 'playing';
+                } else if (p.status === 'playing') {
+                    p.score = (p.score || 0) + baseGameSpeed * 0.05 * (p.speedFactor || 1) * (FIRESTORE_UPDATE_INTERVAL / 16.67);
+                    if (p.score >= p.targetScore) {
+                        p.attemptsLeft = (p.attemptsLeft !== undefined ? p.attemptsLeft : currentRoom.attempts) - 1;
+                        if (currentRoom.rankType === 'total') p.totalScore = (p.totalScore || 0) + p.score;
+                        else p.bestScore = Math.max((p.bestScore || 0), p.score);
+                        p.score = 0;
+                        p.targetScore = 1500 + Math.floor(Math.random() * 3000);
+                        if (p.attemptsLeft > 0) {
+                            p.status = 'waiting';
+                            p.startDelay = 60 + Math.floor(Math.random() * 120);
+                        } else {
+                            p.status = 'dead';
+                        }
+                    }
+                }
+
+                const botDocRef = participantsRef.doc(p.id);
+                const botDisplayScore = (currentRoom.rankType === 'total') ? (p.totalScore || 0) + (p.score || 0) : Math.max((p.bestScore || 0), (p.score || 0));
+                const updateData = { status: p.status, displayScore: Math.floor(botDisplayScore) };
+                if (p.status === 'dead') { // 봇이 최종 종료되면 누적 점수도 함께 저장
+                    updateData.totalScore = Math.floor(p.totalScore || 0);
+                    updateData.bestScore = Math.floor(p.bestScore || 0);
+                }
+                batch.update(botDocRef, updateData);
+            });
+        }
+
+        batch.commit().catch(err => console.error("Firestore 일괄 업데이트 실패:", err));
+    }
+    
+    // 4. 모든 플레이어의 게임 종료 여부 확인
+    if (multiGamePlayers.length > 0 && multiGamePlayers.every(p => p.status === 'dead') && currentRoom.status !== 'finished') {
+        currentRoom.status = 'finished';
+        db.collection('rooms').doc(currentRoom.id).update({ status: 'finished' })
+            .then(() => console.log(`✅ 방 [${currentRoom.id}] 상태를 'finished'로 최종 변경했습니다.`));
+    }
+}
+
 function gameLoop() {
     if (gameState === STATE.PLAYING) {        
         // 1. 부스트 보너스 계산 (하이리스크 하이리턴)
@@ -764,63 +852,18 @@ function gameLoop() {
         }
     }
 
-    // [신규] 멀티플레이 봇 시뮬레이션 (내 상태와 무관하게 동작하도록 위치 이동)
-    if (currentGameMode === 'multi') {
-        const myId = currentUser ? currentUser.id : 'me';
-        const myPlayer = multiGamePlayers.find(p => p.id === myId);
-        
-        // 내 점수 동기화는 내가 게임 중일 때만 수행
-        if (gameState === STATE.PLAYING && myPlayer) {
-            myPlayer.score = score; 
-        }
-
-        // 봇 시뮬레이션
-        multiGamePlayers.forEach(p => {
-            if (p.id !== myId) {
-                if (p.status === 'waiting') {
-                    p.startDelay--;
-                    if (p.startDelay <= 0) p.status = 'playing';
-                } else if (p.status === 'playing') {
-                    if (!p.changeTimer || p.changeTimer <= 0) {
-                        p.changeTimer = 60 + Math.random() * 120;
-                        const action = Math.random();
-                        p.speedFactor = action < 0.25 ? 1.5 : (action < 0.5 ? 0.4 : 1.0);
-                    }
-                    p.changeTimer--;
-                    // [수정] 내가 죽어서 멈춰있어도(gameSpeed=0) 봇은 계속 달려야 하므로 baseGameSpeed 사용
-                    p.score += baseGameSpeed * 0.05 * (p.speedFactor || 1);
-                    
-                    if (p.score >= p.targetScore) {
-                        p.status = 'dead';
-                        if (currentRoom.rankType === 'total') p.totalScore += p.score;
-                        else p.bestScore = Math.max(p.bestScore, p.score);
-                        p.score = 0;
-                    }
-                }
-            }
-        });
-
-        // 모든 플레이어가 완료되었는지 확인하여 방 상태 업데이트
-        if (multiGamePlayers.every(p => p.status === 'dead')) {
-            currentRoom.status = 'finished';
-        }
-    }
+    // [3단계] 멀티플레이 실시간 로직 처리
+    handleMultiplayerTick();
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     skyBg.draw(0); floorBg.draw(GAME_HEIGHT - 124);
     dog.update(); dog.draw();
     handleObstacles(); chicken.update(); chicken.draw();
-    
-    // [신규] 깃털 업데이트 및 그리기
     feathers.forEach(f => { f.update(); f.draw(); });
     feathers = feathers.filter(f => f.opacity > 0); // 사라진 깃털 제거
     
     gameFrame++;
 
-    // [신규] 멀티플레이 랭킹 실시간 렌더링
-    if (currentGameMode === 'multi') {
-        renderMultiRanking();
-    }
     gameLoopId = requestAnimationFrame(gameLoop);
 }
 
@@ -1440,18 +1483,10 @@ function renderMultiRanking() {
     const isTotalMode = currentRoom.rankType === 'total';
     const myId = currentUser ? currentUser.id : 'me';
     
-    const sortedPlayers = [...multiGamePlayers].map(p => {
-        let displayScore = 0;
-        // [수정] 대기 상태('waiting')라도 이전 기록(totalScore, bestScore)이 있으면 표시해야 함
-        if (isTotalMode) {
-            displayScore = p.totalScore + (p.status === 'playing' ? p.score : 0);
-        } else {
-            displayScore = Math.max(p.bestScore, p.score);
-        }
-        return { ...p, displayScore };
-    }).sort((a, b) => {
-        // [수정] 상태와 관계없이 점수 높은 순으로 정렬
-        return b.displayScore - a.displayScore;
+    // [3단계] 서버에서 실시간으로 동기화되는 displayScore를 기준으로 정렬합니다.
+    // 이렇게 하면 모든 클라이언트가 동일한 순위를 보게 됩니다.
+    const sortedPlayers = [...multiGamePlayers].sort((a, b) => {
+        return (b.displayScore || 0) - (a.displayScore || 0);
     });
 
     // [신규] 모든 플레이어가 종료되었는지 확인 (방 전체 완료 여부)
@@ -1487,6 +1522,7 @@ function renderMultiRanking() {
         }
         
         // [수정] 점수가 0이면서 대기중인 경우에만 '대기중' 표시 (그 외에는 순위 표시)
+        // [3단계] displayScore가 0이고 waiting 상태일 때 '대기중' 표시
         let statHtml = '';
         if (p.status === 'waiting' && p.displayScore === 0) {
             statHtml = `<span class="more">대기중</span>`;
@@ -1796,12 +1832,14 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
                             name: botNames[(finalParticipantCount + i) % botNames.length],
                             isBot: true,
                             totalScore: 0,
+                            displayScore: 0, // [3단계] 랭킹 표시용 점수 필드 추가
                             bestScore: 0,
                             status: 'waiting', // 3. 모든 참가자의 초기 상태는 'waiting'으로 설정
                             startDelay: Math.floor(Math.random() * 120) + 60,
                             targetScore: 1500 + Math.floor(Math.random() * 3000),
                             speedFactor: 1,
-                            changeTimer: 0
+                            changeTimer: 0,
+                            attemptsLeft: roomData.attempts // [3단계] 봇의 남은 시도 횟수 추가
                         };
                         const botDocRef = participantsRef.doc(botId);
                         transaction.set(botDocRef, botData); // 2. 봇 정보 등록
@@ -2763,10 +2801,15 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => {
                 if (gameLoopId) cancelAnimationFrame(gameLoopId);
                 
-                if (currentGameMode === 'multi') {
-                    const myId = currentUser ? currentUser.id : 'me';
+                // [3단계] 게임 시작 시 내 상태를 'playing'으로 서버에 업데이트
+                if (currentGameMode === 'multi' && currentUser) {
+                    const myId = currentUser.id;
                     const myPlayer = multiGamePlayers.find(p => p.id === myId);
-                    if (myPlayer) myPlayer.status = 'playing';
+                    if (myPlayer) {
+                        myPlayer.status = 'playing';
+                        const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
+                        participantDocRef.update({ status: 'playing' }).catch(e => console.error("상태 업데이트 실패(playing)", e));
+                    }
                 }
                 playSound('start');
                 playSound('bgm'); 
@@ -2810,11 +2853,16 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => {
                 resetGame();
                 if (gameLoopId) cancelAnimationFrame(gameLoopId);
-                
-                if (currentGameMode === 'multi') {
-                    const myId = currentUser ? currentUser.id : 'me';
+
+                // [3단계] 게임 재시작 시 내 상태를 'playing'으로 서버에 업데이트
+                if (currentGameMode === 'multi' && currentUser) {
+                    const myId = currentUser.id;
                     const myPlayer = multiGamePlayers.find(p => p.id === myId);
-                    if (myPlayer) myPlayer.status = 'playing';
+                    if (myPlayer) {
+                        myPlayer.status = 'playing';
+                        const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
+                        participantDocRef.update({ status: 'playing' }).catch(e => console.error("상태 업데이트 실패(playing)", e));
+                    }
                 }
                 playSound('start');
                 playSound('bgm'); 
