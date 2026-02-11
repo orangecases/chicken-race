@@ -1772,6 +1772,13 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
         currentRoom = { attempts: 1, usedAttempts: 0, title: "싱글 테스트", status: "inprogress" };
         document.getElementById('view-single-mode').classList.remove('hidden');
         document.getElementById('view-multi-rank').classList.add('hidden');
+
+        // [수정] 싱글 모드에서도 게임 시작 준비 화면을 띄워줍니다.
+        resetGame();
+        // [수정] 시작 대기 화면이 보일 때만 컨트롤러를 숨김
+        setControlsVisibility(false);
+        drawStaticFrame();
+        document.getElementById('game-start-screen').classList.remove('hidden');
     } else {
         document.getElementById('view-single-mode').classList.add('hidden');
         document.getElementById('view-multi-rank').classList.remove('hidden');
@@ -1888,13 +1895,6 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
         document.getElementById('game-start-screen').classList.remove('hidden');
         startAutoActionTimer(15, 'exit', '#game-start-screen .time-message');
         renderMultiRanking(); // 랭킹 목록 갱신
-    } else { // 싱글 모드 로직 (기존과 동일)
-        // [수정] 싱글 모드에서도 게임 시작 준비 화면을 띄워줍니다.
-        resetGame();
-        // [수정] 시작 대기 화면이 보일 때만 컨트롤러를 숨김
-        setControlsVisibility(false);
-        drawStaticFrame();
-        document.getElementById('game-start-screen').classList.remove('hidden');
     }
 }
 
