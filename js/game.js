@@ -1285,6 +1285,7 @@ async function exitToLobby() { // Make exitToLobby async
 
     // [수정] 로비로 돌아갈 때 항상 목록을 최신 상태로 갱신하여 동기화 문제를 해결합니다.
     await fetchRaceRooms(false); // Ensure raceRooms is updated and rendered before proceeding
+    fetchMyRooms(); // [신규] 로비로 돌아올 때 내 방 목록도 갱신
 
     // 공통: 게임 씬을 숨기고 인트로 씬을 보여줍니다.
     document.getElementById('scene-intro').classList.remove('hidden');
@@ -2149,6 +2150,7 @@ function loadUserData(user) {
             updateCoinUI();
             // [FIX] 로그인 시에도 fetchRaceRooms()를 호출하여 데이터 로딩과 UI 렌더링 순서를 보장합니다.
             fetchRaceRooms(false);
+            fetchMyRooms(); // [신규] 로그인 시 내 방 목록 데이터 로드
             // 프로필 모달이 열려있다면 갱신
             const sceneUserProfile = document.getElementById('scene-user-profile');
             if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
