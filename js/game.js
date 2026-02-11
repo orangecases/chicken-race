@@ -2849,8 +2849,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.list-tabgroup .refresh').forEach(btn => {
         btn.onclick = (e) => {
             e.stopPropagation(); // 부모인 탭의 클릭 이벤트가 전파되는 것을 막습니다.
-            // [FIX] 새로고침 시, 첫 페이지부터 목록을 다시 불러옵니다.
+            
+            // [FIX] 새로고침 버튼이 동작하지 않는 문제 해결
+            // 원인: 1. 중복 호출 방지 로직 때문에 새로고침이 무시됨. 2. '참가중' 목록 갱신 로직 누락.
+            // 해결: 1. 기존 Promise를 초기화하여 강제로 목록을 다시 불러오도록 수정.
+            //      2. '참가중' 목록도 함께 갱신하도록 fetchMyRooms()를 호출.
+            console.log("🔄️ 목록 새로고침 버튼 클릭됨.");
+            roomFetchPromise = null; // 기존 Promise를 초기화하여 fetchRaceRooms가 다시 실행되도록 함
             fetchRaceRooms(false);
+            fetchMyRooms();
         };
     });
 
