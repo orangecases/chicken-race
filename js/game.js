@@ -42,6 +42,7 @@ let currentMyRoomLimit = 10;   // [신규] 참가중 탭의 목록 노출 개수
 let unsubscribeRoomListener = null; // [신규] 실시간 리스너 해제 함수
 const ROOMS_PER_PAGE = 10;     // 한 번에 불러올 방의 개수
 let allRoomsLoaded = false;    // 모든 방을 다 불러왔는지 여부 (더보기 버튼 표시 제어)
+let myRooms = [];              // [신규] 참가중인 방 목록 데이터 별도 저장
 
 // [신규] 광고 시스템 설정
 const AD_CONFIG = {
@@ -1039,9 +1040,9 @@ function fetchRaceRooms(loadMore = false) {
 
         // [핵심] get() 대신 onSnapshot()을 사용하여 실시간 데이터 동기화
         unsubscribeRoomListener = db.collection('rooms')
-            .where('status', '==', 'inprogress') // [수정] 진행 중인 방만 가져와서 목록 개수 유지 (복합 인덱스 필요)
+            // [수정] 복합 인덱스 문제 회피를 위해 where 절 제거. 대신 limit을 넉넉히 가져와서 클라이언트에서 필터링
             .orderBy('createdAt', 'desc')
-            .limit(currentRoomLimit)
+            .limit(currentRoomLimit + 10) // 필터링될 것을 대비해 여유있게 가져옴
             .onSnapshot((querySnapshot) => {
                 const newRooms = [];
                 querySnapshot.forEach(doc => {
@@ -1080,6 +1081,34 @@ function fetchRaceRooms(loadMore = false) {
     });
 
     return roomFetchPromise;
+}
+
+/**
+ * [신규] 참가중인 방 목록을 별도로 불러옵니다.
+ * raceRooms(전체 목록)에 없는 오래된 방이라도 내가 참가 중이면 보여야 하기 때문입니다.
+ */
+async function fetchMyRooms() {
+    if (!isLoggedIn || !currentUser || !currentUser.joinedRooms) {
+        myRooms = [];
+        renderRoomLists(true);
+        return;
+    }
+    const roomIds = Object.keys(currentUser.joinedRooms);
+    if (roomIds.length === 0) {
+        myRooms = [];
+        renderRoomLists(true);
+        return;
+    }
+
+    // Firestore 'in' 쿼리는 최대 10개까지만 가능하므로 상위 10개만 우선 조회
+    const idsChunk = roomIds.slice(0, 10);
+    try {
+        const q = await db.collection('rooms').where(firebase.firestore.FieldPath.documentId(), 'in', idsChunk).get();
+        myRooms = q.docs.map(doc => mapFirestoreDocToRoom(doc));
+        renderRoomLists(true);
+    } catch (e) {
+        console.error("❌ 내 방 목록 로드 실패:", e);
+    }
 }
 
 /**
@@ -1461,14 +1490,11 @@ function renderRoomLists(refreshSnapshot = false) {
         // [FIX] 레이스룸 스냅샷 필터링 규칙 변경
         // 1. 인원이 꽉 찬 방은 목록에서 제외 (`r.current < r.limit` 조건 추가)
         // [수정] 꽉 찬 방도 목록에 노출하되 입장을 막는 방식으로 변경하여, 불러온 10개가 모두 보이도록 함 (`r.current < r.limit` 제거)
-        // status !== 'finished'는 서버 쿼리에서 이미 걸러지지만 안전장치로 유지
+        // [수정] 서버 쿼리에서 where를 뺐으므로 여기서 status 필터링 수행
         raceRoomSnapshot = raceRooms.filter(r => r.status !== 'finished' && r.current > 0).map(r => r.id);
         
-        // 2. 내 방 스냅샷: 현재 참가 중인 방
-        // [수정] Firestore ID는 문자열이므로 parseInt 제거
-        // [수정] 참가중 목록도 10개씩 끊어서 노출 (페이지네이션)
-        const allMyRooms = (isLoggedIn && currentUser && currentUser.joinedRooms) ? Object.keys(currentUser.joinedRooms) : [];
-        myRoomSnapshot = allMyRooms.slice(0, currentMyRoomLimit);
+        // 2. 내 방 스냅샷: fetchMyRooms로 가져온 데이터 사용
+        myRoomSnapshot = myRooms.map(r => r.id);
     }
 
     raceRoomList.innerHTML = '';
@@ -1537,10 +1563,16 @@ function renderRoomLists(refreshSnapshot = false) {
             raceRoomList.appendChild(raceLi);
         }
 
-        // 2. 참가중인 목록 (내 방): 잠금 아이콘 미노출
-        // [수정] 스냅샷(참가중인 방)에 포함된 방만 렌더링
-        if (myRoomSnapshot.includes(room.id) && userRoomState) {
-            // [신규] '참가중' 탭의 상태 표시 로직을 분리 및 구체화합니다.
+    });
+
+    // [수정] 참가중인 방 목록 렌더링 (myRooms 배열 사용)
+    myRooms.forEach(room => {
+        const userRoomState = (isLoggedIn && currentUser && currentUser.joinedRooms) ? currentUser.joinedRooms[room.id] : null;
+        if (userRoomState) {
+            const rankTypeText = room.rankType === 'total' ? '합산점' : '최고점';
+            // [신규] 디버깅용 봇 추가/삭제 버튼 HTML
+            const debugButtonsHTML = `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`;
+
             const isMyPlayFinished = userUsedAttempts >= room.attempts;
             const isRoomGloballyFinished = room.status === "finished";
             const isRoomFull = room.current >= room.limit;
@@ -2185,6 +2217,7 @@ document.addEventListener('DOMContentLoaded', () => {
             //       UI 렌더링 함수(renderRoomLists)만 호출하여, 비어있는 데이터로 목록이 그려지는 레이스 컨디션이 있었습니다.
             // 해결: 로그인/로그아웃 시 항상 fetchRaceRooms()를 호출하여 데이터를 먼저 가져온 후 UI를 그리도록 순서를 보장합니다.
             fetchRaceRooms(false);
+            fetchMyRooms(); // [신규] 내 방 목록도 갱신 (비움)
             
             // 열려있을 수 있는 프로필 모달 닫기
             const sceneUserProfile = document.getElementById('scene-user-profile');
@@ -2216,6 +2249,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 // 참가중 탭 더보기
                 currentMyRoomLimit += 10;
+                // fetchMyRooms(); // [추후 개선] 내 방 목록 더보기 구현 필요
                 renderRoomLists(true); // 스냅샷 갱신 필요
             }
         };
@@ -2224,8 +2258,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // [신규] 디버깅용 봇 추가/삭제 이벤트 핸들러 (이벤트 위임)
     // [수정] 서버 연동에 따라 Firestore 데이터를 직접 수정하도록 변경
     const handleDebugBotAction = async (e) => {
-        const target = e.target;
-        if (!target.classList.contains('debug-btn')) return;
+        // [FIX] 버튼 내부 텍스트 클릭 시 동작 안 하는 문제 해결 (closest 사용)
+        const target = e.target.closest('.debug-btn');
+        if (!target) return;
 
         e.stopPropagation(); // 부모 li의 방 입장 이벤트가 실행되는 것을 막습니다.
 
@@ -2715,6 +2750,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', () => {
         renderRoomLists(true);
         fetchRaceRooms(false); // [FIX] 탭 전환 시 서버 데이터 갱신
+        fetchMyRooms();        // [신규] 내 방 목록 갱신
     });
     
     // [수정] Top 100 탭 클릭 시 서버에서 랭킹 불러오기
