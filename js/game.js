@@ -26,11 +26,9 @@ let isSoundOn = true; // [신규] 사운드 상태 (true: ON, false: OFF)
 let isLoggedIn = false; // [신규] 로그인 상태
 let currentUser = null; // [신규] 로그인한 사용자 정보
 let unsubscribeUserData = null; // [신규] 유저 데이터 리스너 해제 함수
-let guestCoins = parseInt(localStorage.getItem('chickenRunGuestCoins') || '10'); // [신규] 게스트 코인 (기본 10)
 let multiGamePlayers = []; // [신규] 멀티플레이 참여자 목록
-let roomPlayersCache = {}; // [신규] 방별 전체 플레이어(봇 포함) 상태 저장소
+let unsubscribeParticipantsListener = null; // [신규] 멀티플레이 참가자 실시간 리스너
 let autoActionTimer = null; // [신규] 자동 액션 타이머
-let playerScoresCache = {}; // [신규] 방별 플레이어 점수 캐시
 let isJumpPressed = false; // [신규] 점프 버튼 누름 상태 유지 변수
 let displayedMyRecordsCount = 20; // [신규] 내 기록 표시 개수 (무한 스크롤용)
 
@@ -358,20 +356,6 @@ function handleObstacles() {
 // [4. 핵심 제어 함수]
 
 /**
- * [신규] 플레이어의 최종 점수를 방별로 캐시합니다.
- * @param {object} room - 현재 방 정보
- * @param {object} player - 플레이어 정보
- */
-function cachePlayerScore(room, player) {
-    if (!room || !player) return;
-    const cacheKey = `${room.id}-${player.id}`;
-    playerScoresCache[cacheKey] = {
-        totalScore: player.totalScore,
-        bestScore: player.bestScore
-    };
-}
-
-/**
  * [신규] 코인 UI 업데이트 함수
  * 프로필 모달, 게임 오버레이(시작/일시정지/종료)의 코인 수치를 동기화합니다.
  */
@@ -647,12 +631,16 @@ function handleGameOverUI() {
         const myPlayer = multiGamePlayers.find(p => p.id === myId);
         if (!myPlayer) return;
 
+        const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
+
         myPlayer.attemptsLeft = currentRoom.attempts - userUsedAttempts;
         
         if (myPlayer.attemptsLeft > 0) { // 남은 시도 횟수가 있을 경우
             govTitle.innerText = "WOOPS!";
             govMsg.innerText = `남은 횟수 : ${myPlayer.attemptsLeft}/${currentRoom.attempts}`;
             myPlayer.status = 'waiting'; // 대기 상태로 변경
+            // [2단계] Firestore 상태 업데이트
+            participantDocRef.update({ status: 'waiting' }).catch(e => console.error("상태 업데이트 실패(waiting)", e));
             startAutoActionTimer(30, 'deductAttempt', '#game-over-screen .time-message'); // [수정] 1회 차감 타이머 시작
             btnRestart.style.display = 'block';
             if (btnDeleteRoom) btnDeleteRoom.style.display = 'none';
@@ -662,6 +650,8 @@ function handleGameOverUI() {
             
             // [신규] 멀티플레이 상태 업데이트 (탈락/종료)
             if (myPlayer) myPlayer.status = 'dead'; // [수정] myPlayer 변수가 이미 선언되어 있으므로 재선언(const) 제거
+            // [2단계] Firestore 상태 업데이트
+            participantDocRef.update({ status: 'dead' }).catch(e => console.error("상태 업데이트 실패(dead)", e));
 
             awardBadgeIfEligible(); // [신규] 모든 기회 소진 시 뱃지 수여 판단
 
@@ -677,14 +667,6 @@ function handleGameOverUI() {
 
     renderRoomLists(); 
     renderMultiRanking(); // [신규] 게임 오버 시 랭킹 즉시 갱신
-}
-
-/**
- * [신규] 현재 모든 방의 플레이어 상태(roomPlayersCache)를 localStorage에 저장합니다.
- * 이 함수는 방의 구성원이나 점수 등 영속성이 필요한 데이터가 변경될 때 호출됩니다.
- */
-function saveRoomStates() {
-    localStorage.setItem('chickenRunRoomStates', JSON.stringify(roomPlayersCache));
 }
 
 function gameLoop() {
@@ -746,17 +728,28 @@ function gameLoop() {
             if (chicken.y >= FLOOR_Y) {
                 gameState = STATE.GAMEOVER;
                 // [신규] 멀티플레이 점수 반영 로직 (게임 시도 종료 시점에 한 번만 실행)
-                if (currentGameMode === 'multi' && currentRoom) {
-                    const myId = currentUser ? currentUser.id : 'me';
+                if (currentGameMode === 'multi' && currentRoom && currentUser) { // [수정] currentUser 체크
+                    const myId = currentUser.id;
                     const myPlayer = multiGamePlayers.find(p => p.id === myId);
                     if (myPlayer) {
+                        // 로컬 배열 업데이트 (onSnapshot이 덮어쓰기 전까지 즉각적인 UI 반응용)
                         if (currentRoom.rankType === 'total') {
                             myPlayer.totalScore += score;
                         } else {
                             myPlayer.bestScore = Math.max(myPlayer.bestScore, score);
                         }
                         myPlayer.score = 0; // 현재 판 점수 초기화 (다음 시도를 위해)
-                        cachePlayerScore(currentRoom, myPlayer); // [신규] 점수 캐시
+
+                        // [2단계] 최종 점수를 Firestore에 업데이트
+                        const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
+                        participantDocRef.update({
+                            totalScore: myPlayer.totalScore,
+                            bestScore: myPlayer.bestScore
+                        }).then(() => {
+                            console.log(`✅ 최종 점수(${Math.floor(score)})를 서버에 저장했습니다.`);
+                        }).catch(error => {
+                            console.error("❌ 최종 점수 서버 저장 실패:", error);
+                        });
                     }
                     // [수정] 충돌 시 시도 횟수를 즉시 1회 차감합니다.
                     // [수정] 사용자별 시도 횟수 차감
@@ -1204,6 +1197,13 @@ function togglePause() {
  * [신규] 게임을 종료하고 로비(인트로) 화면으로 돌아갑니다.
  */
 async function exitToLobby() { // Make exitToLobby async
+    // [2단계] 방에서 나갈 때 참가자 리스너를 해제합니다.
+    if (unsubscribeParticipantsListener) {
+        unsubscribeParticipantsListener();
+        unsubscribeParticipantsListener = null;
+        console.log("🎧 Participants listener detached.");
+    }
+
     stopBGM(); // [신규] 로비로 나갈 때 BGM 정지
     if (gameLoopId) { cancelAnimationFrame(gameLoopId); gameLoopId = null; }
 
@@ -1309,8 +1309,6 @@ async function exitToLobby() { // Make exitToLobby async
                     myPlayer.score = 0;
                     score = 0;
                 }
-                cachePlayerScore(currentRoom, myPlayer); // [신규] 나가기 전 최종 점수 캐시
-
                 gameState = STATE.GAMEOVER;
                 myPlayer.status = 'dead';
             }
@@ -1329,7 +1327,6 @@ async function exitToLobby() { // Make exitToLobby async
     // 공통: 게임 씬을 숨기고 인트로 씬을 보여줍니다.
     document.getElementById('scene-intro').classList.remove('hidden');
     document.getElementById('scene-game').classList.add('hidden');
-    saveRoomStates(); // [신규] 게임 씬을 나갈 때 방 상태를 저장합니다.
 
     // 공통: 게임 UI 상태 초기화
     document.getElementById('btn-pause-toggle').classList.remove('paused');
@@ -1766,22 +1763,22 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
                 const roomData = roomDoc.data();
                 const targetPlayerCount = roomData.currentPlayers;
 
-                // 2. 현재 참가자 목록을 가져옵니다.
+                // 2. 현재 참가자 목록에서 내 정보를 찾습니다. (트랜잭션 내에서)
                 const participantsSnapshot = await transaction.get(participantsRef);
                 const existingParticipants = participantsSnapshot.docs.map(doc => doc.data());
+                const myDocRef = participantsRef.doc(myPlayerId);
+                const myDoc = await transaction.get(myDocRef);
 
                 // 3. '나'의 정보를 참가자 목록에 추가/업데이트합니다.
                 const myParticipantData = {
                     id: myPlayerId,
                     name: currentUser.nickname,
                     isBot: false,
-                    totalScore: 0,
-                    bestScore: 0,
+                    // [2단계] 재입장 시 기존 점수 유지. 문서가 있으면 기존 점수 사용, 없으면 0.
+                    totalScore: myDoc.exists ? myDoc.data().totalScore : 0,
+                    bestScore: myDoc.exists ? myDoc.data().bestScore : 0,
                     status: 'waiting' // 3. 모든 참가자의 초기 상태는 'waiting'으로 설정
                 };
-                // 참고: 재입장 시 점수가 0으로 초기화되지 않도록,
-                // 실제로는 기존 점수 정보를 읽어와서 유지해야 합니다. (2단계에서 구현 예정)
-                const myDocRef = participantsRef.doc(myPlayerId);
                 transaction.set(myDocRef, myParticipantData, { merge: true }); // 1. 유저 정보 등록 (없으면 생성, 있으면 업데이트)
 
                 // 4. 필요한 경우 봇을 추가합니다. (목표 인원 수에 도달하도록)
@@ -1812,9 +1809,21 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
                 }
             });
 
-            // 트랜잭션 성공 후, 최신 참가자 목록 전체를 불러와 multiGamePlayers 배열을 구성합니다.
-            const finalParticipantsSnapshot = await participantsRef.get();
-            multiGamePlayers = finalParticipantsSnapshot.docs.map(doc => doc.data());
+            // 트랜잭션 성공 후, 최신 참가자 목록을 한번 불러와 초기 multiGamePlayers 배열을 구성합니다.
+            const initialParticipantsSnapshot = await participantsRef.get();
+            multiGamePlayers = initialParticipantsSnapshot.docs.map(doc => doc.data());
+
+            // [2단계] 참가자 목록에 대한 실시간 리스너를 부착합니다.
+            // 이 리스너는 점수 변경, 상태 변경 등을 감지하여 랭킹 UI를 자동으로 업데이트합니다.
+            if (unsubscribeParticipantsListener) unsubscribeParticipantsListener(); // 기존 리스너 해제
+            unsubscribeParticipantsListener = participantsRef.onSnapshot((snapshot) => {
+                // 변경된 데이터로 로컬 플레이어 목록을 업데이트합니다.
+                multiGamePlayers = snapshot.docs.map(doc => doc.data());
+                // 랭킹 UI를 다시 그립니다.
+                renderMultiRanking();
+            }, (error) => {
+                console.error("❌ Participants listener error:", error);
+            });
 
         } catch (error) {
             console.error("❌ 참가자 등록 또는 목록 로딩 실패:", error);
@@ -1835,16 +1844,9 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
 
         if (myPlayerInRoom && (isMyGameOver || isRoomFinished)) {
             // 1. 방이 종료되었거나 내 게임이 끝난 상태이므로, 모든 플레이어 상태를 'dead'로 강제 동기화합니다.
-            multiGamePlayers.forEach(p => {
-                if (p.status !== 'dead') {
-                    p.status = 'dead';
-                    if (p.id !== myPlayerId && p.totalScore === 0 && p.bestScore === 0) {
-                        if (currentRoom.rankType === 'total') p.totalScore = p.targetScore || 1500;
-                        else p.bestScore = p.targetScore || 1500;
-                    }
-                }
-            });
-            myPlayerInRoom.status = 'dead';
+            // [2단계] 서버 데이터가 진실 공급원이므로, 클라이언트에서 임의로 상태를 변경할 필요가 없습니다.
+            // onSnapshot 리스너가 서버의 최종 상태를 정확히 반영해줍니다.
+            if (myPlayerInRoom) myPlayerInRoom.status = 'dead';
             
             // 2. 'GAME OVER' 화면을 표시하고 즉시 함수를 종료하여, '시작' 화면이 표시되지 않도록 합니다.
             resetGame();
@@ -2307,9 +2309,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (sceneUserProfile) sceneUserProfile.classList.add('hidden');
         }
     });
-
-    // [신규] 페이지 로드 시, localStorage에 저장된 방 상태(플레이어 목록 및 점수)를 불러옵니다.
-    roomPlayersCache = JSON.parse(localStorage.getItem('chickenRunRoomStates')) || {};
 
     // [신규] 기록 로드 및 렌더링
     generateTop100Scores(); // 랭킹 데이터를 먼저 생성
