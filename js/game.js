@@ -37,6 +37,8 @@ let displayedMyRecordsCount = 20; // [신규] 내 기록 표시 개수 (무한 �
 // [수정] 페이지네이션(Pagination) 설정: 1만개 이상의 방이 있어도 앱이 원활하게 동작하도록 합니다.
 let lastVisibleRoomDoc = null; // 마지막으로 불러온 방의 문서 참조
 let isFetchingRooms = false;   // 방 목록을 불러오는 중인지 여부 (중복 호출 방지)
+let currentRoomLimit = 10;     // [신규] 현재 불러올 방의 개수 (limit)
+let unsubscribeRoomListener = null; // [신규] 실시간 리스너 해제 함수
 const ROOMS_PER_PAGE = 10;     // 한 번에 불러올 방의 개수
 let allRoomsLoaded = false;    // 모든 방을 다 불러왔는지 여부 (더보기 버튼 표시 제어)
 
@@ -1004,71 +1006,78 @@ function mapFirestoreDocToRoom(doc) {
  * 1만개 이상의 방이 생성될 경우, 모든 방을 한 번에 불러오는 기존 방식은 성능 저하 및 비용 문제를 야기합니다.
  * 이 함수는 Firestore에서 페이지 단위로 방 목록을 효율적으로 불러옵니다.
  * @description 실시간 업데이트(`onSnapshot`) 대신 '더보기'와 '새로고침'을 통한 수동 업데이트 방식으로 변경됩니다.
+ * [FIX] 방 목록 로딩 방식을 실시간 리스너 + Limit 증가 방식으로 변경합니다.
+ * - 실시간 업데이트(친구 입장 등)를 반영하기 위해 onSnapshot을 사용합니다.
+ * - 성능 이슈(1만개 방)를 해결하기 위해 limit()를 사용하여 필요한 만큼만 구독합니다.
+ * - '더보기' 클릭 시 limit를 증가시켜 재구독합니다.
  * @param {boolean} loadMore - true이면 '더보기'로 다음 페이지를, false이면 목록을 새로고침합니다.
  */
 let roomFetchPromise = null; // [신규] 중복 호출 방지 및 대기 처리를 위한 Promise 변수
+function fetchRaceRooms(loadMore = false) {
+    // [FIX] 중복 호출 방지: 이미 로딩 중이고 단순 조회라면 기존 Promise 반환
+    // 단, loadMore인 경우는 limit을 늘려 새로 호출해야 하므로 제외
+    if (roomFetchPromise && !loadMore) return roomFetchPromise;
 
-async function fetchRaceRooms(loadMore = false) {
-    // [FIX] 이미 로딩 중이라면 해당 Promise를 반환하여 exitToLobby 등에서 기다릴 수 있게 합니다.
-    if (roomFetchPromise) return roomFetchPromise;
+    roomFetchPromise = new Promise((resolve, reject) => {
+        if (loadMore) {
+            currentRoomLimit += ROOMS_PER_PAGE;
+        } else {
+            currentRoomLimit = ROOMS_PER_PAGE;
+        }
 
-    roomFetchPromise = (async () => {
         const loader = document.getElementById('race-room-loader');
         if (loader) loader.classList.remove('hidden');
 
-        try {
-            // 참여 가능한 방을 최신순으로 정렬하여 쿼리합니다.
-            let query = db.collection('rooms')
-                .orderBy('createdAt', 'desc')
-                .limit(ROOMS_PER_PAGE);
-
-            if (loadMore && lastVisibleRoomDoc) {
-                query = query.startAfter(lastVisibleRoomDoc);
-            } else {
-                // 새로고침 또는 첫 로드 시, 기존 목록을 초기화합니다.
-                raceRooms = [];
-                allRoomsLoaded = false;
-            }
-
-            const querySnapshot = await query.get();
-
-            const newRooms = [];
-            querySnapshot.forEach(doc => {
-                newRooms.push(mapFirestoreDocToRoom(doc));
-            });
-
-            // 새로 불러온 방 목록을 기존 목록에 추가합니다.
-            if (loadMore) {
-                raceRooms.push(...newRooms);
-            } else {
-                raceRooms = newRooms;
-            }
-
-            // 다음 페이지를 불러오기 위해 마지막 문서를 저장합니다.
-            lastVisibleRoomDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
-
-            // 더 이상 불러올 방이 없는지 확인합니다.
-            if (querySnapshot.docs.length < ROOMS_PER_PAGE) {
-                allRoomsLoaded = true;
-                if (loader) loader.classList.add('hidden'); // 모든 방을 불러왔으면 더보기 버튼 숨김
-            }
-
-            // 스냅샷을 갱신하며 화면을 다시 그립니다.
-            renderRoomLists(true);
-
-        } catch (error) {
-            console.error("❌ 레이스룸 목록 불러오기 실패:", error);
-        } finally {
-            if (loader && !allRoomsLoaded) loader.classList.remove('hidden');
-            else if (loader) loader.classList.add('hidden');
+        // 기존 리스너 해제 (limit이 변경되면 재구독해야 함)
+        if (unsubscribeRoomListener) {
+            unsubscribeRoomListener();
+            unsubscribeRoomListener = null;
         }
-    })();
 
-    try {
-        await roomFetchPromise;
-    } finally {
-        roomFetchPromise = null;
-    }
+        let isFirstCallback = true;
+
+        // [핵심] get() 대신 onSnapshot()을 사용하여 실시간 데이터 동기화
+        unsubscribeRoomListener = db.collection('rooms')
+            .orderBy('createdAt', 'desc')
+            .limit(currentRoomLimit)
+            .onSnapshot((querySnapshot) => {
+                const newRooms = [];
+                querySnapshot.forEach(doc => {
+                    newRooms.push(mapFirestoreDocToRoom(doc));
+                });
+                raceRooms = newRooms;
+
+                // 더 이상 불러올 방이 없는지 확인
+                if (querySnapshot.docs.length < currentRoomLimit) {
+                    allRoomsLoaded = true;
+                    if (loader) loader.classList.add('hidden');
+                } else {
+                    allRoomsLoaded = false;
+                    if (loader) loader.classList.remove('hidden');
+                }
+
+                // 마지막 문서 참조 업데이트 (필요 시 사용)
+                if (querySnapshot.docs.length > 0) {
+                    lastVisibleRoomDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
+                }
+
+                // 첫 로드(사용자 액션) 시에는 스냅샷을 재구축(renderRoomLists(true))하여 목록을 갱신합니다.
+                // 이후 실시간 업데이트 시에는 스냅샷 유지(renderRoomLists(false))하여 목록이 흔들리지 않게 합니다.
+                if (isFirstCallback) {
+                    renderRoomLists(true);
+                    isFirstCallback = false;
+                    resolve(); // 데이터 로딩 완료 시 Promise 해결
+                } else {
+                    renderRoomLists(false);
+                }
+            }, (error) => {
+                console.error("❌ 방 목록 리스너 오류:", error);
+                if (loader) loader.classList.add('hidden');
+                reject(error);
+            });
+    });
+
+    return roomFetchPromise;
 }
 
 /**
