@@ -1219,8 +1219,19 @@ async function exitToLobby() { // Make exitToLobby async
                         transaction.delete(roomRef);
                         console.log(`✅ 방 [${currentRoom.id}]의 마지막 참가자가 퇴장하여 방을 자동으로 삭제합니다.`);
                     } else {
-                        // 아직 플레이어가 남아있으므로 인원수만 감소시킵니다.
-                        transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
+                        // 플레이어가 남아있을 경우: 인원수 감소 및 방장 위임 처리
+                        const updates = { currentPlayers: firebase.firestore.FieldValue.increment(-1) };
+                        // 현재 나가는 플레이어가 방장인지 확인
+                        if (currentUser && currentData.creatorUid === currentUser.id) {
+                            // 남은 플레이어 중 한 명에게 방장을 위임합니다.
+                            // 현재 클라이언트가 아는 플레이어 목록(봇 포함)에서 다음 방장을 찾습니다.
+                            const otherPlayers = multiGamePlayers.filter(p => p.id !== currentUser.id);
+                            if (otherPlayers.length > 0) {
+                                updates.creatorUid = otherPlayers[0].id; // 첫 번째 플레이어에게 위임
+                                console.log(`👑 방장이 퇴장하여 다음 플레이어(${updates.creatorUid})에게 방장 권한을 위임합니다.`);
+                            }
+                        }
+                        transaction.update(roomRef, updates);
                     }
                 });
 
@@ -1368,7 +1379,7 @@ async function attemptToJoinRoom(room) {
         let finalPlayerCount;
         await db.runTransaction(async (transaction) => {
             const roomDoc = await transaction.get(roomRef);
-            if (!roomDoc.exists) { throw "존재하지 않는 방입니다."; }
+            if (!roomDoc.exists) { throw "레이스룸이 존재하지 않습니다."; }
 
             const serverRoomData = roomDoc.data();
             if (serverRoomData.currentPlayers >= serverRoomData.maxPlayers) { throw "방이 가득 찼습니다."; }
@@ -1706,6 +1717,20 @@ function enterGameScene(mode, roomData = null) {
         const rankSpan = document.querySelector('#view-multi-rank .list-title span');
         if (rankSpan) {
             rankSpan.innerText = currentRoom.rankType === 'total' ? '(점수합산)' : '(최고점수)';
+        }
+
+        // [신규] 게임 내 랭킹 목록에 디버깅용 봇 추가/삭제 버튼 추가
+        const listTitle = document.querySelector('#view-multi-rank .list-title');
+        if (listTitle) {
+            // 기존 버튼 그룹이 있다면 제거
+            const oldButtons = listTitle.querySelector('.debug-btn-group');
+            if (oldButtons) oldButtons.remove();
+
+            const buttonGroup = document.createElement('div');
+            buttonGroup.className = 'debug-btn-group';
+            buttonGroup.style.marginLeft = 'auto'; // 버튼을 오른쪽으로 밀기
+            buttonGroup.innerHTML = `<button class="debug-btn" data-room-id="${currentRoom.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${currentRoom.id}" data-action="remove">-</button>`;
+            listTitle.appendChild(buttonGroup);
         }
     }
 
@@ -2318,10 +2343,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
             
-            const roomInList = raceRooms.find(r => r.id === roomId);
-            if (roomInList) {
-                roomInList.current = finalCount;
-                renderRoomLists(false); // 스냅샷은 유지하고 UI만 다시 그립니다.
+            const isInGame = !document.getElementById('scene-game').classList.contains('hidden');
+
+            // 게임 씬 내부에서 봇 조작 시
+            if (isInGame && currentRoom && currentRoom.id === roomId) {
+                currentRoom.current = finalCount;
+                if (action === 'add' && multiGamePlayers.length < finalCount) {
+                    const botNames = ['고수치킨', '초보닭', '구경꾼', '치킨런', '달려라하니', '양념반후라이드반', '파닭파닭', '치맥사랑', 'KFC할아버지'];
+                    multiGamePlayers.push({ 
+                        id: `bot_debug_${Date.now()}`, 
+                        name: botNames[Math.floor(Math.random() * botNames.length)], 
+                        score: 0, totalScore: 0, bestScore: 0, 
+                        status: 'waiting', attemptsLeft: currentRoom.attempts,
+                        startDelay: Math.floor(Math.random() * 120) + 60, targetScore: 1500 + Math.floor(Math.random() * 3000), speedFactor: 1, changeTimer: 0
+                    });
+                } else if (action === 'remove' && multiGamePlayers.length > finalCount) {
+                    const botIndex = multiGamePlayers.findIndex(p => p.id.startsWith('bot_'));
+                    if (botIndex > -1) multiGamePlayers.splice(botIndex, 1);
+                }
+                renderMultiRanking();
+                console.log(`[Debug-InGame] 방 [${roomId}] 인원수 수정. 현재: ${finalCount}`);
+            } else {
+                // 로비에서 봇 조작 시
+                const roomInList = raceRooms.find(r => r.id === roomId);
+                if (roomInList) {
+                    roomInList.current = finalCount;
+                    renderRoomLists(false); // 스냅샷은 유지하고 UI만 다시 그립니다.
+                }
             }
             console.log(`[Debug] 방 [${roomId}]의 인원수를 성공적으로 수정했습니다.`);
         } catch (error) {
@@ -2330,6 +2378,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     document.getElementById('content-race-room').addEventListener('click', handleDebugBotAction, true);
     document.getElementById('content-my-rooms').addEventListener('click', handleDebugBotAction, true);
+    document.getElementById('view-multi-rank').addEventListener('click', handleDebugBotAction, true);
 
     // [신규] 내 기록 목록 무한 스크롤 이벤트 리스너
     const myRecordScrollArea = document.querySelector('#content-my-record .list-scroll-area');
