@@ -1460,9 +1460,9 @@ async function attemptToJoinRoom(room) {
         console.log(`✅ 방 [${room.id}] 입장 트랜잭션 성공. (인원수 증가 및 참가자 등록 완료)`);
 
         // 로컬 room 객체의 인원 수를 서버 트랜잭션 후의 최종 값으로 덮어씁니다.
-        // [FIX] 존재하지 않는 finalPlayerCount 변수 참조 오류 수정.
+        // [FIX] 존재하지 않는 finalPlayerCount 변수 참조 오류 및 SyntaxError 유발 가능성 수정.
         // 트랜잭션이 성공했으므로 로컬 데이터도 1 증가시킵니다.
-        room.current++;
+        room.current++; // This was `room.current = finalPlayerCount;` which caused a ReferenceError
 
         // 다른 '미시작' 방에서 자동으로 나가고 코인 환불
         if (currentUser.joinedRooms) {
