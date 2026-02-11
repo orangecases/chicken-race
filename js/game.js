@@ -999,7 +999,8 @@ function mapFirestoreDocToRoom(doc) {
         rankType: roomData.rankType,
         isLocked: !!roomData.password,
         password: roomData.password,
-        creatorUid: roomData.creatorUid
+        creatorUid: roomData.creatorUid,
+        createdAt: roomData.createdAt // [신규] 정렬 및 스냅샷 유지를 위해 생성 시간 필드 추가
     };
 }
 
@@ -1044,33 +1045,47 @@ function fetchRaceRooms(loadMore = false) {
             .orderBy('createdAt', 'desc')
             .limit(currentRoomLimit + 10) // 필터링될 것을 대비해 여유있게 가져옴
             .onSnapshot((querySnapshot) => {
-                const newRooms = [];
-                querySnapshot.forEach(doc => {
-                    newRooms.push(mapFirestoreDocToRoom(doc));
-                });
-                raceRooms = newRooms;
-
-                // 더 이상 불러올 방이 없는지 확인
-                if (querySnapshot.docs.length < currentRoomLimit) {
-                    allRoomsLoaded = true;
-                    if (loader) loader.classList.add('hidden');
-                } else {
-                    allRoomsLoaded = false;
-                    if (loader) loader.classList.remove('hidden');
-                }
-
-                // 마지막 문서 참조 업데이트 (필요 시 사용)
-                if (querySnapshot.docs.length > 0) {
-                    lastVisibleRoomDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
-                }
-
-                // 첫 로드(사용자 액션) 시에는 스냅샷을 재구축(renderRoomLists(true))하여 목록을 갱신합니다.
-                // 이후 실시간 업데이트 시에는 스냅샷 유지(renderRoomLists(false))하여 목록이 흔들리지 않게 합니다.
+                // [FIX] 실시간 업데이트 시 목록이 흔들리는 문제(flickering) 및 항목 수가 변하는 문제 해결
+                // 원인: onSnapshot이 호출될 때마다 raceRooms 배열 전체를 교체하여 목록이 재정렬되거나 길이가 변경됨.
+                // 해결: 첫 로드 시에만 전체 목록을 가져오고, 이후에는 docChanges()를 사용하여 변경된 항목만 '병합'합니다.
+                //       'removed'된 항목은 배열에서 제거하지 않아, 사용자가 클릭 시 "존재하지 않는 방" 알림을 띄울 수 있도록 합니다.
                 if (isFirstCallback) {
+                    // 1. 첫 로드: 전체 목록을 가져와 raceRooms를 채우고, 화면에 렌더링합니다.
+                    const newRooms = [];
+                    querySnapshot.forEach(doc => {
+                        newRooms.push(mapFirestoreDocToRoom(doc));
+                    });
+                    raceRooms = newRooms;
+
+                    // 더 이상 불러올 방이 없는지 확인
+                    if (querySnapshot.docs.length < currentRoomLimit) {
+                        allRoomsLoaded = true;
+                        if (loader) loader.classList.add('hidden');
+                    } else {
+                        allRoomsLoaded = false;
+                        if (loader) loader.classList.remove('hidden');
+                    }
+
                     renderRoomLists(true);
                     isFirstCallback = false;
                     resolve(); // 데이터 로딩 완료 시 Promise 해결
                 } else {
+                    // 2. 실시간 업데이트: 변경된 내용만 raceRooms 배열에 반영합니다.
+                    querySnapshot.docChanges().forEach((change) => {
+                        const roomData = mapFirestoreDocToRoom(change.doc);
+                        const index = raceRooms.findIndex(r => r.id === roomData.id);
+
+                        if (change.type === 'modified') {
+                            // '수정': 기존 방 정보를 업데이트합니다.
+                            if (index > -1) Object.assign(raceRooms[index], roomData);
+                        } else if (change.type === 'removed') {
+                            // '삭제': 목록에서 제거하지 않고, 인원수를 0으로 만들어 '유령 방'으로 남겨둡니다.
+                            // 이렇게 하면 목록 길이가 유지되고, 클릭 시 "존재하지 않는 방" 처리가 가능해집니다.
+                            if (index > -1) raceRooms[index].current = 0;
+                        }
+                        // '추가(added)'는 무시합니다. 새 방은 '새로고침'이나 '더보기' 시에만 목록에 나타나야 합니다.
+                    });
+                    // 변경 사항이 반영된 목록을 다시 그리지만, 스냅샷은 유지하여 목록 순서나 길이가 변하지 않게 합니다.
                     renderRoomLists(false);
                 }
             }, (error) => {
