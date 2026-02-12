@@ -1429,10 +1429,8 @@ async function attemptToJoinRoom(room) {
     
     const roomRef = db.collection('rooms').doc(room.id);
     try {
-        // [FIX] 신규 입장 시 플레이어 수가 맞지 않는 문제 해결 (e.g. 1/4 방에 들어가면 나 혼자 있는 현상)
-        // 원인: 로컬의 방 정보(stale)를 기준으로 인원 수를 계산하여, 서버의 최신 인원 수와 불일치했습니다.
-        // 해결: 트랜잭션 내에서 최종 인원 수를 확정하고, 그 값을 기준으로 게임 씬을 구성합니다.
-        let finalPlayerCount;
+        // [FIX] 방 참가 로직을 단일 트랜잭션으로 통합하여 원자성을 보장합니다.
+        // 인원 수 증가와 참가자 목록 추가가 동시에 성공하거나 실패하도록 하여 데이터 불일치를 원천 차단합니다.
         await db.runTransaction(async (transaction) => {
             const roomDoc = await transaction.get(roomRef);
             if (!roomDoc.exists) { throw "레이스룸이 존재하지 않습니다."; }
@@ -1440,15 +1438,26 @@ async function attemptToJoinRoom(room) {
             const serverRoomData = roomDoc.data();
             if (serverRoomData.currentPlayers >= serverRoomData.maxPlayers) { throw "방이 가득 찼습니다."; }
 
-            // 트랜잭션이 성공했을 때의 최종 인원 수를 미리 계산합니다.
-            finalPlayerCount = serverRoomData.currentPlayers + 1;
+            // 1. 인원 수를 1 증가시킵니다.
             transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
+
+            // 2. 참가자(participants) 하위 컬렉션에 내 정보를 추가합니다.
+            const myParticipantRef = roomRef.collection('participants').doc(currentUser.id);
+            const myParticipantData = {
+                id: currentUser.id,
+                name: currentUser.nickname,
+                isBot: false,
+                totalScore: 0,
+                bestScore: 0,
+                status: 'waiting',
+                displayScore: 0,
+                attemptsLeft: serverRoomData.attempts
+            };
+            transaction.set(myParticipantRef, myParticipantData);
         });
 
-        console.log(`✅ 방 [${room.id}] 입장 트랜잭션 성공. 인원 수 증가.`);
+        console.log(`✅ 방 [${room.id}] 입장 트랜잭션 성공. (인원수 증가 및 참가자 등록 완료)`);
 
-        // 로컬 room 객체의 인원 수를 서버 트랜잭션 후의 최종 값으로 덮어씁니다.
-        // [FIX] finalPlayerCount 변수 참조 시 발생할 수 있는 잠재적 오류를 방지하고 로직을 명확하게 수정합니다.
         // 트랜잭션이 성공했으므로 로컬 데이터도 1 증가시킵니다.
         room.current++;
 
@@ -1787,87 +1796,28 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
 
     // --- 멀티플레이어 모드 로직 ---
     if (mode === 'multi') {
-        // [1단계] 방 입장 시 참가자(나 + 봇)를 Firestore에 등록하고, 로컬 플레이어 목록을 구성합니다.
-        // Firestore를 '단일 진실 공급원(Single Source of Truth)'으로 사용합니다.
+        // [FIX] 참가자 등록 로직을 enterGameScene에서 제거하고, 방 생성/참가 함수로 이전합니다.
+        // enterGameScene은 이제 서버에 있는 참가자 목록을 그대로 읽어와 화면을 그리는 역할만 담당합니다.
         const myPlayerId = currentUser.id;
         const roomRef = db.collection('rooms').doc(currentRoom.id);
         const participantsRef = roomRef.collection('participants');
 
         try {
-            // 트랜잭션을 사용하여 여러 사용자가 동시에 입장/등록할 때 데이터 정합성을 보장합니다.
-            await db.runTransaction(async (transaction) => {
-                // 1. 방의 최신 정보를 가져와 목표 인원 수를 확인합니다.
-                const roomDoc = await transaction.get(roomRef);
-                if (!roomDoc.exists) throw "존재하지 않는 방입니다.";
-                const roomData = roomDoc.data();
-                const targetPlayerCount = roomData.currentPlayers;
-
-                // 2. 현재 참가자 목록에서 내 정보를 찾습니다. (트랜잭션 내에서)
-                const participantsSnapshot = await transaction.get(participantsRef);
-                const existingParticipants = participantsSnapshot.docs.map(doc => doc.data());
-                const myDocRef = participantsRef.doc(myPlayerId);
-                const myDoc = await transaction.get(myDocRef);
-
-                // 3. '나'의 정보를 참가자 목록에 추가/업데이트합니다.
-                const myParticipantData = {
-                    id: myPlayerId,
-                    name: currentUser.nickname,
-                    isBot: false,
-                    // [2단계] 재입장 시 기존 점수 유지. 문서가 있으면 기존 점수 사용, 없으면 0.
-                    totalScore: myDoc.exists ? myDoc.data().totalScore : 0,
-                    bestScore: myDoc.exists ? myDoc.data().bestScore : 0,
-                    status: 'waiting' // 3. 모든 참가자의 초기 상태는 'waiting'으로 설정
-                };
-                transaction.set(myDocRef, myParticipantData, { merge: true }); // 1. 유저 정보 등록 (없으면 생성, 있으면 업데이트)
-
-                // 4. 필요한 경우 봇을 추가합니다. (목표 인원 수에 도달하도록)
-                const amINew = !existingParticipants.some(p => p.id === myPlayerId);
-                const finalParticipantCount = existingParticipants.length + (amINew ? 1 : 0);
-                const botsToCreate = targetPlayerCount - finalParticipantCount;
-
-                if (botsToCreate > 0) {
-                    console.log(`[Transaction] 목표 인원(${targetPlayerCount})을 맞추기 위해 봇 ${botsToCreate}명을 추가합니다.`);
-                    const botNames = ['고수치킨', '초보닭', '구경꾼', '치킨런', '달려라하니', '양념반후라이드반', '파닭파닭', '치맥사랑', 'KFC할아버지'];
-                    for (let i = 0; i < botsToCreate; i++) {
-                        const botId = `bot_${Date.now()}_${i}`;
-                        const botData = {
-                            id: botId,
-                            name: botNames[(finalParticipantCount + i) % botNames.length],
-                            isBot: true,
-                            totalScore: 0,
-                            displayScore: 0, // [3단계] 랭킹 표시용 점수 필드 추가
-                            bestScore: 0,
-                            status: 'waiting', // 3. 모든 참가자의 초기 상태는 'waiting'으로 설정
-                            startDelay: Math.floor(Math.random() * 120) + 60,
-                            targetScore: 1500 + Math.floor(Math.random() * 3000),
-                            speedFactor: 1,
-                            changeTimer: 0,
-                            attemptsLeft: roomData.attempts // [3단계] 봇의 남은 시도 횟수 추가
-                        };
-                        const botDocRef = participantsRef.doc(botId);
-                        transaction.set(botDocRef, botData); // 2. 봇 정보 등록
-                    }
-                }
-            });
-
-            // 트랜잭션 성공 후, 최신 참가자 목록을 한번 불러와 초기 multiGamePlayers 배열을 구성합니다.
+            // 초기 참가자 목록을 한 번 불러옵니다.
             const initialParticipantsSnapshot = await participantsRef.get();
             multiGamePlayers = initialParticipantsSnapshot.docs.map(doc => doc.data());
 
-            // [2단계] 참가자 목록에 대한 실시간 리스너를 부착합니다.
-            // 이 리스너는 점수 변경, 상태 변경 등을 감지하여 랭킹 UI를 자동으로 업데이트합니다.
+            // 참가자 목록에 대한 실시간 리스너를 부착합니다.
             if (unsubscribeParticipantsListener) unsubscribeParticipantsListener(); // 기존 리스너 해제
             unsubscribeParticipantsListener = participantsRef.onSnapshot((snapshot) => {
-                // 변경된 데이터로 로컬 플레이어 목록을 업데이트합니다.
                 multiGamePlayers = snapshot.docs.map(doc => doc.data());
-                // 랭킹 UI를 다시 그립니다.
                 renderMultiRanking();
             }, (error) => {
                 console.error("❌ Participants listener error:", error);
             });
 
         } catch (error) {
-            console.error("❌ 참가자 등록 또는 목록 로딩 실패:", error);
+            console.error("❌ 참가자 목록 로딩 또는 리스너 설정 실패:", error);
             alert("방에 참가하는 중 오류가 발생했습니다. 로비로 돌아갑니다.");
             exitToLobby();
             return;
@@ -2613,37 +2563,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const roomDataForFirestore = {
-                title: titleInput || "즐거운 레이스",
-                password: passwordInput.length > 0 ? passwordInput : null,
-                maxPlayers: parseInt(limitInput) || 5,
-                // [FIX] 방 생성 시 봇 1명을 자동으로 추가하여, 생성자가 바로 퇴장해도 방이 사라지지 않도록 합니다.
-                // 참여 인원은 '나 + 봇'이므로 2명으로 시작합니다.
-                currentPlayers: 2,
-                creatorUid: user.uid,
-                attempts: attempts,
-                rankType: rankType,
-                status: "inprogress",
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            };
-
             try {
-                const docRef = await db.collection("rooms").add(roomDataForFirestore);
-                console.log("✅ 방이 서버에 생성되었습니다! ID:", docRef.id);
+                // [FIX] 방 생성 로직을 Batch Write로 변경하여 원자성을 보장합니다.
+                // 방 생성, 생성자 등록, 초기 봇 등록을 한 번의 작업으로 처리합니다.
+                const batch = db.batch();
+                const roomRef = db.collection("rooms").doc(); // 새 문서 ID 미리 생성
 
-                const newRoomForGame = {
-                    id: docRef.id,
-                    title: roomDataForFirestore.title,
-                    limit: roomDataForFirestore.maxPlayers,
-                    // [FIX] 로컬 데이터도 서버와 동일하게 2명으로 시작합니다.
-                    current: 2,
-                    attempts: roomDataForFirestore.attempts,
+                // 1. 방 정보 설정
+                const roomData = {
+                    title: titleInput || "즐거운 레이스",
+                    password: passwordInput.length > 0 ? passwordInput : null,
+                    maxPlayers: parseInt(limitInput) || 5,
+                    currentPlayers: 2, // 나 + 봇
+                    creatorUid: user.uid,
+                    attempts: attempts,
+                    rankType: rankType,
                     status: "inprogress",
-                    rankType: roomDataForFirestore.rankType,
-                    isLocked: !!roomDataForFirestore.password,
-                    password: roomDataForFirestore.password,
-                    creatorUid: roomDataForFirestore.creatorUid // [신규] 방장 ID 추가
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 };
+                batch.set(roomRef, roomData);
+
+                // 2. 생성자(나)를 참가자 목록에 추가
+                const creatorRef = roomRef.collection('participants').doc(user.uid);
+                const creatorData = { id: user.uid, name: currentUser.nickname, isBot: false, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts };
+                batch.set(creatorRef, creatorData);
+
+                // 3. 초기 봇 1명을 참가자 목록에 추가 (방 자동 폭파 방지)
+                const botRef = roomRef.collection('participants').doc(`bot_${Date.now()}`);
+                const botData = { id: botRef.id, name: '초보닭', isBot: true, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts, startDelay: 60, targetScore: 1500 };
+                batch.set(botRef, botData);
+
+                // 4. Batch 작업 실행
+                await batch.commit();
+                console.log("✅ 방 생성 및 초기 참가자 등록 완료! ID:", roomRef.id);
+
+                // 5. 로컬 데이터 업데이트 및 게임 씬 진입
+                const newRoomForGame = mapFirestoreDocToRoom({ id: roomRef.id, data: () => roomData });
 
                 // [FIX] 방 생성 후 새로고침 시 방 목록이 사라지는 문제 및 '참가중' 목록에 방이 보이지 않는 문제 해결
                 // 원인: 로컬 `raceRooms` 배열에만 추가하고, `currentUser.joinedRooms` 변경 사항이 Firestore에 제대로 저장되지 않았습니다.
