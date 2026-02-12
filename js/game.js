@@ -1722,19 +1722,21 @@ function renderRoomLists(refreshSnapshot = false) {
 
     // [신규] 탭 상태에 따라 '더보기' 버튼(로더) 표시 여부 제어
     const loader = document.getElementById('race-room-loader');
+    const myLoader = document.getElementById('my-room-loader');
     const tabRaceRoom = document.getElementById('tab-race-room');
     const isRaceTabActive = tabRaceRoom && tabRaceRoom.classList.contains('active');
 
-    if (loader) {
-        if (isRaceTabActive) {
+    if (isRaceTabActive) {
+        if (loader) {
             // 레이스룸 탭: fetchRaceRooms에서 설정한 allRoomsLoaded 상태 따름
             if (allRoomsLoaded) loader.classList.add('hidden');
             else loader.classList.remove('hidden');
-        } else {
-            // 참가중 탭: 전체 개수와 현재 노출 개수 비교
+        }
+    } else {
+        if (myLoader) {
             const totalMyRooms = (isLoggedIn && currentUser && currentUser.joinedRooms) ? Object.keys(currentUser.joinedRooms).length : 0;
-            if (totalMyRooms > currentMyRoomLimit) loader.classList.remove('hidden');
-            else loader.classList.add('hidden');
+            if (totalMyRooms > currentMyRoomLimit) myLoader.classList.remove('hidden');
+            else myLoader.classList.add('hidden');
         }
     }
 }
@@ -2320,14 +2322,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnLoadMore = document.getElementById('btn-load-more');
     if (btnLoadMore) {
         btnLoadMore.onclick = () => {
-            const tabRaceRoom = document.getElementById('tab-race-room');
-            if (tabRaceRoom && tabRaceRoom.classList.contains('active')) {
-                fetchRaceRooms(true);
-            } else {
-                // 참가중 탭 더보기
-                currentMyRoomLimit += 10;
-                fetchMyRooms(); // [FIX] 주석 해제하여 더보기 기능 활성화
-            }
+            fetchRaceRooms(true);
+        };
+    }
+
+    const btnLoadMoreMy = document.getElementById('btn-load-more-my');
+    if (btnLoadMoreMy) {
+        btnLoadMoreMy.onclick = () => {
+            currentMyRoomLimit += 10;
+            fetchMyRooms();
         };
     }
     
