@@ -643,6 +643,14 @@ function handleGameOverUI() {
         let validScore = score;
         if (isNaN(validScore)) validScore = 0;
 
+        // [FIX] 랭킹 표시용 점수(displayScore) 계산
+        // 기존에는 현재 판 점수(validScore)를 displayScore로 저장하여, 합산 점수가 아닌 마지막 점수만 표시되는 문제가 있었습니다.
+        let finalDisplayScore = 0;
+        if (currentRoom.rankType === 'total') {
+            finalDisplayScore = myPlayer.totalScore;
+        } else {
+            finalDisplayScore = myPlayer.bestScore;
+        }
 
         if (myPlayer.attemptsLeft > 0) { // 남은 시도 횟수가 있을 경우
             govTitle.innerText = "WOOPS!";
@@ -656,9 +664,9 @@ function handleGameOverUI() {
              participantDocRef.update({
                             totalScore: myPlayer.totalScore,
                             bestScore: myPlayer.bestScore,
-                            displayScore : validScore
+                            displayScore : finalDisplayScore
                         }).then(() => {
-                            console.log(`✅ 최종 점수(${Math.floor(validScore)})를 서버에 저장했습니다.`);
+                            console.log(`✅ 최종 점수(${Math.floor(finalDisplayScore)})를 서버에 저장했습니다.`);
                         }).catch(error => {
                             console.error("❌ 최종 점수 서버 저장 실패:", error);
                         });
@@ -679,9 +687,9 @@ function handleGameOverUI() {
              participantDocRef.update({
                             totalScore: myPlayer.totalScore,
                             bestScore: myPlayer.bestScore,
-                             displayScore : validScore
+                             displayScore : finalDisplayScore
                         }).then(() => {
-                            console.log(`✅ 최종 점수(${Math.floor(validScore)})를 서버에 저장했습니다.`);
+                            console.log(`✅ 최종 점수(${Math.floor(finalDisplayScore)})를 서버에 저장했습니다.`);
                         }).catch(error => {
                             console.error("❌ 최종 점수 서버 저장 실패:", error);
                         });
@@ -853,9 +861,9 @@ function gameLoop() {
                             // [FIX] score가 NaN이 되는 경우를 방지하기 위해 유효성 검사 추가
                             if (isNaN(score)) score = 0;
 
-                            myPlayer.totalScore += score;
+                            myPlayer.totalScore = (myPlayer.totalScore || 0) + score;
                         } else {
-                            myPlayer.bestScore = Math.max(myPlayer.bestScore, score);
+                            myPlayer.bestScore = Math.max((myPlayer.bestScore || 0), score);
                         }
                         myPlayer.score = 0; // 현재 판 점수 초기화 (다음 시도를 위해)
 
