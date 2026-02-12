@@ -26,6 +26,7 @@ let isSoundOn = true; // [신규] 사운드 상태 (true: ON, false: OFF)
 let isLoggedIn = false; // [신규] 로그인 상태
 let currentUser = null; // [신규] 로그인한 사용자 정보
 let unsubscribeUserData = null; // [신규] 유저 데이터 리스너 해제 함수
+let guestCoins = parseInt(localStorage.getItem('chickenRunGuestCoins') || '10'); // [FIX] 삭제되었던 게스트 코인 변수 복원
 let multiGamePlayers = []; // [신규] 멀티플레이 참여자 목록
 let unsubscribeParticipantsListener = null; // [신규] 멀티플레이 참가자 실시간 리스너
 let autoActionTimer = null; // [신규] 자동 액션 타이머
@@ -1447,7 +1448,9 @@ async function attemptToJoinRoom(room) {
         console.log(`✅ 방 [${room.id}] 입장 트랜잭션 성공. 인원 수 증가.`);
 
         // 로컬 room 객체의 인원 수를 서버 트랜잭션 후의 최종 값으로 덮어씁니다.
-        room.current = finalPlayerCount;
+        // [FIX] finalPlayerCount 변수 참조 시 발생할 수 있는 잠재적 오류를 방지하고 로직을 명확하게 수정합니다.
+        // 트랜잭션이 성공했으므로 로컬 데이터도 1 증가시킵니다.
+        room.current++;
 
         // 다른 '미시작' 방에서 자동으로 나가고 코인 환불
         if (currentUser.joinedRooms) {
