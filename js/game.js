@@ -1080,7 +1080,7 @@ function fetchRaceRooms(loadMore = false) {
         unsubscribeRoomListener = db.collection('rooms')
             // [수정] 복합 인덱스 문제 회피를 위해 where 절 제거. 대신 limit을 넉넉히 가져와서 클라이언트에서 필터링
             .orderBy('createdAt', 'desc')
-            .limit(currentRoomLimit + 10) // 필터링될 것을 대비해 여유있게 가져옴
+            .limit(currentRoomLimit + 5) // 필터링될 것을 대비해 여유있게 가져옴
             .onSnapshot((querySnapshot) => {
                 // [FIX] 실시간 업데이트 시 목록이 흔들리는 문제(flickering) 및 항목 수가 변하는 문제 해결
                 // 원인: onSnapshot이 호출될 때마다 raceRooms 배열 전체를 교체하여 목록이 재정렬되거나 길이가 변경됨.
