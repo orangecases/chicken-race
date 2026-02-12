@@ -2378,7 +2378,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
 
                 } else if (action === 'remove') {
-                    const participantsSnapshot = await transaction.get(participantsRef.where('isBot', '==', true).limit(1));
+                    const participantsSnapshot = await participantsRef.where('isBot', '==', true).limit(1).get();
                     if (participantsSnapshot.empty) {
                         console.warn(`[Debug] 방 [${roomId}]에 제거할 봇이 없습니다.`);
                         return; // 트랜잭션 중단
