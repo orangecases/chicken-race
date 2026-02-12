@@ -638,6 +638,12 @@ function handleGameOverUI() {
 
         myPlayer.attemptsLeft = currentRoom.attempts - userUsedAttempts;
         
+        // [FIX] 충돌 직후 점수가 NaN이 되는 문제 해결
+        // 충돌 시 score가 NaN이 되는 경우를 방지하기 위해 유효성 검사 추가
+        let validScore = score;
+        if (isNaN(validScore)) validScore = 0;
+
+
         if (myPlayer.attemptsLeft > 0) { // 남은 시도 횟수가 있을 경우
             govTitle.innerText = "WOOPS!";
             govMsg.innerText = `남은 횟수 : ${myPlayer.attemptsLeft}/${currentRoom.attempts}`;
@@ -646,6 +652,17 @@ function handleGameOverUI() {
             participantDocRef.update({ status: 'waiting' }).catch(e => console.error("상태 업데이트 실패(waiting)", e));
             startAutoActionTimer(30, 'deductAttempt', '#game-over-screen .time-message'); // [수정] 1회 차감 타이머 시작
             btnRestart.style.display = 'block';
+            // [2단계] 최종 점수를 Firestore에 업데이트
+             participantDocRef.update({
+                            totalScore: myPlayer.totalScore,
+                            bestScore: myPlayer.bestScore,
+                            displayScore : validScore
+                        }).then(() => {
+                            console.log(`✅ 최종 점수(${Math.floor(validScore)})를 서버에 저장했습니다.`);
+                        }).catch(error => {
+                            console.error("❌ 최종 점수 서버 저장 실패:", error);
+                        });
+
             if (btnDeleteRoom) btnDeleteRoom.style.display = 'none';
         } else {
             govTitle.innerText = "GAME OVER";
@@ -659,6 +676,16 @@ function handleGameOverUI() {
             awardBadgeIfEligible(); // [신규] 모든 기회 소진 시 뱃지 수여 판단
 
             btnRestart.style.display = 'none';
+             participantDocRef.update({
+                            totalScore: myPlayer.totalScore,
+                            bestScore: myPlayer.bestScore,
+                             displayScore : validScore
+                        }).then(() => {
+                            console.log(`✅ 최종 점수(${Math.floor(validScore)})를 서버에 저장했습니다.`);
+                        }).catch(error => {
+                            console.error("❌ 최종 점수 서버 저장 실패:", error);
+                        });
+
             if (btnDeleteRoom) btnDeleteRoom.style.display = 'block';
             // [수정] 나만 끝났다고 해서 방 전체를 종료 상태로 변경하지 않음
             // (모든 사용자가 완료해야 종료됨 - 현재는 시뮬레이션이므로 상태 유지)
@@ -823,6 +850,9 @@ function gameLoop() {
                     if (myPlayer) {
                         // 로컬 배열 업데이트 (onSnapshot이 덮어쓰기 전까지 즉각적인 UI 반응용)
                         if (currentRoom.rankType === 'total') {
+                            // [FIX] score가 NaN이 되는 경우를 방지하기 위해 유효성 검사 추가
+                            if (isNaN(score)) score = 0;
+
                             myPlayer.totalScore += score;
                         } else {
                             myPlayer.bestScore = Math.max(myPlayer.bestScore, score);
