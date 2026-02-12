@@ -2392,8 +2392,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     const botToRemoveDoc = participantsSnapshot.docs[0];
                     transaction.delete(botToRemoveDoc.ref);
 
-                    // 2. room 문서의 currentPlayers 감소
-                    transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
+                    // 2. room 문서의 currentPlayers 감소 또는 방 삭제
+                    const newPlayerCount = roomData.currentPlayers - 1;
+                    if (newPlayerCount <= 0) {
+                        transaction.delete(roomRef);
+                    } else {
+                        transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
+                    }
                 }
             });
             
