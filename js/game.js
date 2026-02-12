@@ -38,10 +38,10 @@ let displayedMyRecordsCount = 20; // [신규] 내 기록 표시 개수 (무한 �
 // [수정] 페이지네이션(Pagination) 설정: 1만개 이상의 방이 있어도 앱이 원활하게 동작하도록 합니다.
 let lastVisibleRoomDoc = null; // 마지막으로 불러온 방의 문서 참조
 let isFetchingRooms = false;   // 방 목록을 불러오는 중인지 여부 (중복 호출 방지)
-let currentRoomLimit = 10;     // [신규] 현재 불러올 방의 개수 (limit)
-let currentMyRoomLimit = 10;   // [신규] 참가중 탭의 목록 노출 개수 (limit)
+let currentRoomLimit = 5;     // [신규] 현재 불러올 방의 개수 (limit)
+let currentMyRoomLimit = 5;   // [신규] 참가중 탭의 목록 노출 개수 (limit)
 let unsubscribeRoomListener = null; // [신규] 실시간 리스너 해제 함수
-const ROOMS_PER_PAGE = 10;     // 한 번에 불러올 방의 개수
+const ROOMS_PER_PAGE = 5;     // 한 번에 불러올 방의 개수
 let allRoomsLoaded = false;    // 모든 방을 다 불러왔는지 여부 (더보기 버튼 표시 제어)
 let myRooms = [];              // [신규] 참가중인 방 목록 데이터 별도 저장
 
@@ -2326,8 +2326,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 // 참가중 탭 더보기
                 currentMyRoomLimit += 10;
-                // fetchMyRooms(); // [추후 개선] 내 방 목록 더보기 구현 필요
-                renderRoomLists(true); // 스냅샷 갱신 필요
+                fetchMyRooms(); // [FIX] 주석 해제하여 더보기 기능 활성화
             }
         };
     }
