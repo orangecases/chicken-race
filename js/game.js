@@ -1926,9 +1926,13 @@ function handleHomeButtonClick() {
     } else if (gameState === STATE.GAMEOVER) {
         // 멀티플레이 모드에서 시도 횟수가 남았는지 확인
         if (currentGameMode === 'multi' && currentRoom) {
-            const myId = currentUser ? currentUser.id : 'me';
-            const myPlayer = multiGamePlayers.find(p => p.id === myId);
-            if (myPlayer && myPlayer.attemptsLeft > 0) {
+            // [FIX] onSnapshot에 의해 myPlayer.attemptsLeft가 초기화될 수 있으므로,
+            // currentUser.joinedRooms를 기준으로 남은 횟수를 직접 계산합니다.
+            const userRoomState = (currentUser && currentUser.joinedRooms) ? currentUser.joinedRooms[currentRoom.id] : null;
+            const usedAttempts = userRoomState ? userRoomState.usedAttempts : 0;
+            const attemptsLeft = currentRoom.attempts - usedAttempts;
+
+            if (attemptsLeft > 0) {
                 isInProgress = true;
             }
         }
