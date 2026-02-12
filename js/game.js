@@ -1577,7 +1577,8 @@ function renderRoomLists(refreshSnapshot = false) {
         // [수정] 꽉 찬 방도 목록에 노출하되 입장을 막는 방식으로 변경하여, 불러온 10개가 모두 보이도록 함 (`r.current < r.limit` 제거)
         // [수정] 서버 쿼리에서 where를 뺐으므로 여기서 status 필터링 수행
         // [FIX] 필터링 후 설정된 개수(currentRoomLimit)만큼만 잘라서 보여줍니다.
-        raceRoomSnapshot = raceRooms.filter(r => r.status !== 'finished' && r.current > 0)
+        // [요청반영] 모집 마감된(꽉 찬) 방은 목록에서 제외합니다.
+        raceRoomSnapshot = raceRooms.filter(r => r.status !== 'finished' && r.current > 0 && r.current < r.limit)
             .slice(0, currentRoomLimit)
             .map(r => r.id);
         
