@@ -2331,81 +2331,77 @@ document.addEventListener('DOMContentLoaded', () => {
     // [신규] 디버깅용 봇 추가/삭제 이벤트 핸들러 (이벤트 위임)
     // [수정] 서버 연동에 따라 Firestore 데이터를 직접 수정하도록 변경
     const handleDebugBotAction = async (e) => {
-        // [FIX] 버튼 내부 텍스트 클릭 시 동작 안 하는 문제 해결 (closest 사용)
         const target = e.target.closest('.debug-btn');
         if (!target) return;
 
         e.stopPropagation(); // 부모 li의 방 입장 이벤트가 실행되는 것을 막습니다.
 
-        const roomId = target.dataset.roomId; // Firestore ID는 문자열입니다.
+        const roomId = target.dataset.roomId;
         const action = target.dataset.action;
         if (!roomId) return;
 
         const roomRef = db.collection('rooms').doc(roomId);
+        const participantsRef = roomRef.collection('participants');
 
-        // [FIX] 봇 추가/삭제 버튼이 동작하지 않는 문제 해결
-        // 원인: 페이지네이션으로 변경 후 실시간 리스너(onSnapshot)가 없어, DB 변경 후 UI가 업데이트되지 않았습니다.
-        // 해결: 트랜잭션 성공 후, 로컬 데이터를 직접 수정하고 목록 UI를 수동으로 다시 렌더링합니다.
-        let finalCount; // 트랜잭션 내에서 결정된 최종 인원 수를 저장할 변수
         try {
             await db.runTransaction(async (transaction) => {
                 const roomDoc = await transaction.get(roomRef);
-                if (!roomDoc.exists) {
-                    throw "존재하지 않는 방입니다.";
-                }
+                if (!roomDoc.exists) throw "존재하지 않는 방입니다.";
+                
+                const roomData = roomDoc.data();
 
-                const data = roomDoc.data();
                 if (action === 'add') {
-                    if (data.currentPlayers < data.maxPlayers) {
-                        finalCount = data.currentPlayers + 1;
-                        transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
-                    } else {
-                        finalCount = data.currentPlayers;
+                    if (roomData.currentPlayers >= roomData.maxPlayers) {
                         console.warn(`[Debug] 방 [${roomId}]이(가) 가득 찼습니다.`);
+                        return; // 트랜잭션 중단
                     }
+                    
+                    // 1. participants 하위 컬렉션에 봇 추가
+                    const botNames = ['고수치킨', '초보닭', '구경꾼', '치킨런', '달려라하니', '양념반후라이드반', '파닭파닭', '치맥사랑', 'KFC할아버지'];
+                    const botId = `bot_debug_${Date.now()}`;
+                    const botData = {
+                        id: botId,
+                        name: botNames[Math.floor(Math.random() * botNames.length)],
+                        isBot: true,
+                        totalScore: 0,
+                        bestScore: 0,
+                        status: 'waiting',
+                        displayScore: 0,
+                        attemptsLeft: roomData.attempts,
+                        startDelay: Math.floor(Math.random() * 120) + 60,
+                        targetScore: 1500 + Math.floor(Math.random() * 3000)
+                    };
+                    const botDocRef = participantsRef.doc(botId);
+                    transaction.set(botDocRef, botData);
+
+                    // 2. room 문서의 currentPlayers 증가
+                    transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
+
                 } else if (action === 'remove') {
-                    finalCount = data.currentPlayers - 1;
-                    if (finalCount <= 0) {
-                        // 참가 인원이 0명이 되므로 방을 삭제합니다.
-                        finalCount = 0; // UI 업데이트를 위해 0으로 설정
-                        transaction.delete(roomRef);
-                        console.log(`[Debug] 방 [${roomId}]의 인원수가 0이 되어 자동으로 삭제합니다.`);
-                    } else {
-                        // 아직 참가 인원이 있으면 숫자만 감소시킵니다.
-                        transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
+                    const participantsSnapshot = await transaction.get(participantsRef.where('isBot', '==', true).limit(1));
+                    if (participantsSnapshot.empty) {
+                        console.warn(`[Debug] 방 [${roomId}]에 제거할 봇이 없습니다.`);
+                        return; // 트랜잭션 중단
                     }
+
+                    // 1. participants 하위 컬렉션에서 봇 1명 제거
+                    const botToRemoveDoc = participantsSnapshot.docs[0];
+                    transaction.delete(botToRemoveDoc.ref);
+
+                    // 2. room 문서의 currentPlayers 감소
+                    transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
                 }
             });
             
+            console.log(`[Debug] 방 [${roomId}]의 참가자 정보를 성공적으로 수정했습니다.`);
+            
+            // 트랜잭션 성공 후, 로비에 있다면 목록을 수동으로 갱신합니다.
+            // 게임 씬 내부에 있다면 onSnapshot 리스너가 UI를 자동으로 업데이트합니다.
             const isInGame = !document.getElementById('scene-game').classList.contains('hidden');
-
-            // 게임 씬 내부에서 봇 조작 시
-            if (isInGame && currentRoom && currentRoom.id === roomId) {
-                currentRoom.current = finalCount;
-                if (action === 'add' && multiGamePlayers.length < finalCount) {
-                    const botNames = ['고수치킨', '초보닭', '구경꾼', '치킨런', '달려라하니', '양념반후라이드반', '파닭파닭', '치맥사랑', 'KFC할아버지'];
-                    multiGamePlayers.push({ 
-                        id: `bot_debug_${Date.now()}`, 
-                        name: botNames[Math.floor(Math.random() * botNames.length)], 
-                        score: 0, totalScore: 0, bestScore: 0, 
-                        status: 'waiting', attemptsLeft: currentRoom.attempts,
-                        startDelay: Math.floor(Math.random() * 120) + 60, targetScore: 1500 + Math.floor(Math.random() * 3000), speedFactor: 1, changeTimer: 0
-                    });
-                } else if (action === 'remove' && multiGamePlayers.length > finalCount) {
-                    const botIndex = multiGamePlayers.findIndex(p => p.id.startsWith('bot_'));
-                    if (botIndex > -1) multiGamePlayers.splice(botIndex, 1);
-                }
-                renderMultiRanking();
-                console.log(`[Debug-InGame] 방 [${roomId}] 인원수 수정. 현재: ${finalCount}`);
-            } else {
-                // 로비에서 봇 조작 시
-                const roomInList = raceRooms.find(r => r.id === roomId);
-                if (roomInList) {
-                    roomInList.current = finalCount;
-                    renderRoomLists(false); // 스냅샷은 유지하고 UI만 다시 그립니다.
-                }
+            if (!isInGame) {
+                fetchRaceRooms(false);
+                fetchMyRooms();
             }
-            console.log(`[Debug] 방 [${roomId}]의 인원수를 성공적으로 수정했습니다.`);
         } catch (error) {
             console.error("❌ 디버그 인원 수정 실패:", error);
         }
