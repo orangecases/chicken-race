@@ -739,18 +739,18 @@ function handleMultiplayerTick() {
         if (myPlayer && (myPlayer.status === 'playing' || myPlayer.status === 'waiting')) {
             const myDocRef = participantsRef.doc(myId);
             
-            // [FIX] NaN 방지: myPlayer.score가 undefined일 경우 0 처리
-            const currentRunScore = (typeof myPlayer.score === 'number' && !isNaN(myPlayer.score)) ? myPlayer.score : 0;
+            // [FIX] NaN 문제 해결: onSnapshot으로 덮어쓰여질 수 있는 myPlayer.score 대신,
+            // 항상 최신 상태인 전역 변수 score를 직접 사용하여 계산합니다.
+            const currentRunScore = (typeof score === 'number' && !isNaN(score)) ? score : 0;
             
             const displayScore = (currentRoom.rankType === 'total')
                 ? (myPlayer.totalScore || 0) + currentRunScore
                 : Math.max((myPlayer.bestScore || 0), currentRunScore);
             
-            // NaN 체크 후 업데이트
+            // NaN 체크 후 displayScore만 업데이트 (status 업데이트는 다른 곳에서 담당)
             if (!isNaN(displayScore)) {
                 batch.update(myDocRef, {
-                    displayScore: Math.floor(displayScore),
-                    status: 'playing'
+                    displayScore: Math.floor(displayScore)
                 });
             }
         }
@@ -1288,126 +1288,86 @@ function togglePause() {
  * [신규] 게임을 종료하고 로비(인트로) 화면으로 돌아갑니다.
  */
 async function exitToLobby() { // Make exitToLobby async
-    // [2단계] 방에서 나갈 때 참가자 리스너를 해제합니다.
     if (unsubscribeParticipantsListener) {
         unsubscribeParticipantsListener();
         unsubscribeParticipantsListener = null;
         console.log("🎧 Participants listener detached.");
     }
 
-    stopBGM(); // [신규] 로비로 나갈 때 BGM 정지
+    stopBGM();
     if (gameLoopId) { cancelAnimationFrame(gameLoopId); gameLoopId = null; }
 
-    if (currentGameMode === 'multi' && currentRoom) { // 멀티플레이 모드
-        const myId = currentUser ? currentUser.id : 'me';
-        const myPlayer = multiGamePlayers.find(p => p.id === myId);
-        // '준비' 화면에서 시작 전에 나가는 경우에만 방에서 실제로 나갑니다.
-        // 이 경우에만 '10초 후 자동 아웃' 타이머를 중지합니다.
-        const userUsedAttempts = (currentUser && currentUser.joinedRooms[currentRoom.id]) ? currentUser.joinedRooms[currentRoom.id].usedAttempts : 0;
-        if (myPlayer && myPlayer.status === 'waiting' && userUsedAttempts === 0) {
-            clearAutoActionTimer();
-
-            // [FIX] 게임 시작 전 퇴장 시, 트랜잭션을 사용하여 안전하게 인원수를 감소시키고, 0명이 되면 방을 자동 삭제합니다.
-            // [FIX] 트랜잭션을 await하여 서버 업데이트가 완료된 후 목록을 갱신하도록 보장합니다.
-            // 기존에는 await가 없어 서버 데이터가 갱신되기 전에 목록을 불러와(fetchRaceRooms) 인원수가 줄어들지 않은 상태로 표시되었습니다.
+    // [FIX] 유령 플레이어 문제 해결: 퇴장 로직을 통합하여 모든 경우에 서버 데이터를 정리합니다.
+    if (currentGameMode === 'multi' && currentRoom && currentUser) {
             const roomRef = db.collection('rooms').doc(currentRoom.id);
+            const myId = currentUser.id;
             
             try {
+            // Get all participants first to determine the new host if needed.
+            const participantsSnapshot = await roomRef.collection('participants').get();
+            const allParticipants = participantsSnapshot.docs.map(doc => doc.data());
+            const myParticipant = allParticipants.find(p => p.id === myId);
+
+            // Only run transaction if I am actually a participant
+            if (myParticipant) {
                 await db.runTransaction(async (transaction) => {
                     const roomDoc = await transaction.get(roomRef);
-                    if (!roomDoc.exists) { return; } // 방이 이미 삭제된 경우
+                    if (!roomDoc.exists) return;
 
-                    const currentData = roomDoc.data();
-                    const newPlayerCount = currentData.currentPlayers - 1;
+                    const roomData = roomDoc.data();
+                    const myParticipantRef = roomRef.collection('participants').doc(myId);
 
+                    // 1. Delete my participant document
+                    transaction.delete(myParticipantRef);
+
+                    // 2. Update room document
+                    const newPlayerCount = roomData.currentPlayers - 1;
                     if (newPlayerCount <= 0) {
-                        // 마지막 플레이어가 나갔으므로 방을 삭제합니다.
+                        // Last player, delete the room
                         transaction.delete(roomRef);
-                        console.log(`✅ 방 [${currentRoom.id}]의 마지막 참가자가 퇴장하여 방을 자동으로 삭제합니다.`);
                     } else {
-                        // 플레이어가 남아있을 경우: 인원수 감소 및 방장 위임 처리
                         const updates = { currentPlayers: firebase.firestore.FieldValue.increment(-1) };
-                        // 현재 나가는 플레이어가 방장인지 확인
-                        if (currentUser && currentData.creatorUid === currentUser.id) {
-                            // 남은 플레이어 중 한 명에게 방장을 위임합니다.
-                            // 현재 클라이언트가 아는 플레이어 목록(봇 포함)에서 다음 방장을 찾습니다.
-                            const otherPlayers = multiGamePlayers.filter(p => p.id !== currentUser.id);
+                        // If I am the host, find a new one
+                        if (roomData.creatorUid === myId) {
+                            const otherPlayers = allParticipants.filter(p => p.id !== myId);
                             if (otherPlayers.length > 0) {
-                                updates.creatorUid = otherPlayers[0].id; // 첫 번째 플레이어에게 위임
-                                console.log(`👑 방장이 퇴장하여 다음 플레이어(${updates.creatorUid})에게 방장 권한을 위임합니다.`);
+                                // Assign the first remaining player as the new host
+                                updates.creatorUid = otherPlayers[0].id;
+                                console.log(`👑 Host left. New host is ${updates.creatorUid}`);
                             }
                         }
                         transaction.update(roomRef, updates);
-                        
-                        // [FIX] 참가자 목록(participants)에서 자신을 제거합니다. (유령 참가자 방지)
-                        const myParticipantRef = roomRef.collection('participants').doc(currentUser.id);
-                        transaction.delete(myParticipantRef);
                     }
                 });
-
-                console.log(`✅ 방 [${currentRoom.id}] 퇴장. 서버 인원 수 감소.`);
-                // [FIX] 퇴장 후 로컬 데이터 동기화 (목록 인원수 불일치 문제 해결)
-                if (currentUser && currentUser.joinedRooms[currentRoom.id]) {
-                    const roomId = currentRoom.id;
-                    // 1. 유저의 참가 목록에서 방 제거 (로컬 + 서버)
-                    delete currentUser.joinedRooms[roomId];
-                    db.collection("users").doc(currentUser.id).update({
-                        [`joinedRooms.${roomId}`]: firebase.firestore.FieldValue.delete()
-                    }).catch(error => console.error("❌ 참가 목록에서 방 제거 실패:", error));
-            
-                    // 2. 로컬 방 목록(raceRooms) 인원 수 갱신
-                    const roomInList = raceRooms.find(r => r.id === roomId);
-                    if (roomInList) {
-                        roomInList.current--;
-                        if (roomInList.current <= 0) {
-                            raceRooms = raceRooms.filter(r => r.id !== roomId);
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error("❌ 방 퇴장 시 인원 수 업데이트 실패:", error);
             }
-            
-            // [신규] 게임 시작 전(대기 상태) 퇴장 시 코인 환불 로직
-            if (currentUser) {
-                // [수정] 실제로 비용을 지불한 경우에만 환불
+
+            // After successful server cleanup, clean up local user data.
+            if (currentUser.joinedRooms[currentRoom.id]) {
+                const roomId = currentRoom.id;
                 const userRoomState = currentUser.joinedRooms[currentRoom.id];
-                if (userRoomState && userRoomState.isPaid) {
-                    const refund = currentRoom.attempts;
-                    currentUser.coins += refund;
-                    // alert(`게임 대기 중 퇴장하여 코인이 환불되었습니다. (+${refund})`);
-                }
-            }
-
-            multiGamePlayers = []; // 전역 플레이어 목록 초기화
-        }
-        // [수정] 게임 진행 중(일시정지, 재시도 대기 등)에 나가는 경우 -> GAME OVER 처리
-        else if (myPlayer) {
-            // 플레이 중, 일시정지, 또는 재시도 대기(GAMEOVER) 상태에서 나가는 경우
-            if (gameState === STATE.PLAYING || gameState === STATE.PAUSED || gameState === STATE.GAMEOVER) {
-                clearAutoActionTimer(); // 타이머 해제
-
-                // [수정] 홈으로 나가면 남은 시도 횟수를 모두 소진한 것으로 처리 (재진입 시 Game Over)
-                // [수정] 사용자별 시도 횟수를 최대치로 설정
-                if (currentUser && currentUser.joinedRooms[currentRoom.id]) {
-                    currentUser.joinedRooms[currentRoom.id].usedAttempts = currentRoom.attempts;
-                    saveUserDataToFirestore(); // [FIX] 시도 횟수 변경 시 서버에 즉시 저장
-                }
                 
-                // 점수 저장 (PLAYING/PAUSED 일 때만. GAMEOVER는 이미 저장됨)
-                if (gameState === STATE.PLAYING || gameState === STATE.PAUSED) {
-                    if (currentRoom.rankType === 'total') {
-                        myPlayer.totalScore += score;
-                    } else {
-                        myPlayer.bestScore = Math.max(myPlayer.bestScore, score);
+                // Refund coins if they paid but never played.
+                if (userRoomState && userRoomState.isPaid) {
+                    const roomInfo = raceRooms.find(r => r.id === roomId) || myRooms.find(r => r.id === roomId) || currentRoom;
+                    if (roomInfo) {
+                        currentUser.coins += roomInfo.attempts;
+                        console.log(`코인 환불: +${roomInfo.attempts}`);
                     }
-                    myPlayer.score = 0;
-                    score = 0;
                 }
-                gameState = STATE.GAMEOVER;
-                myPlayer.status = 'dead';
+
+                // Remove from local and server-side joinedRooms list.
+                delete currentUser.joinedRooms[roomId];
+                await db.collection("users").doc(myId).update({
+                    [`joinedRooms.${roomId}`]: firebase.firestore.FieldValue.delete()
+                });
             }
+        } catch (error) {
+            console.error("❌ Error during room exit:", error);
         }
+
+        // Reset local state
+        multiGamePlayers = [];
+        clearAutoActionTimer();
     } else { // 싱글플레이 모드
         clearAutoActionTimer();
         multiGamePlayers = []; // 플레이어 목록 초기화
