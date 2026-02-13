@@ -1432,7 +1432,10 @@ async function attemptToJoinRoom(room) {
             if (serverRoomData.currentPlayers >= serverRoomData.maxPlayers) { throw "방이 가득 찼습니다."; }
 
             // 1. 인원 수를 1 증가시킵니다.
-            transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
+            transaction.update(roomRef, {
+                currentPlayers: firebase.firestore.FieldValue.increment(1),
+                humanParticipantIds: firebase.firestore.FieldValue.arrayUnion(currentUser.id)
+            });
 
             // 2. 참가자(participants) 하위 컬렉션에 내 정보를 추가합니다.
             const myParticipantRef = roomRef.collection('participants').doc(currentUser.id);
@@ -1988,34 +1991,15 @@ async function deleteCurrentRoom() {
  * 기존 deleteCurrentRoom은 방 자체를 DB에서 삭제하여 모든 참가자에게 영향을 주는 버그가 있었습니다.
  * 이 함수는 현재 로그인한 유저의 '참가 목록'에서만 방을 제거합니다.
  */
-async function removeFromMyRooms() {
+function removeFromMyRooms() {
     if (!currentRoom || !currentRoom.id || !currentUser) {
         console.warn("목록에서 제거할 방 정보가 없습니다.");
-        await exitToLobby(false);
+        exitToLobby(false);
         return;
     }
 
-    const roomId = currentRoom.id;
-    const myId = currentUser.id;
-
-    try {
-        // [FIX] '참가중인 목록에서 삭제'는 참가 기록(점수)은 유지하되, 목록에서만 숨기는 기능입니다.
-        // 따라서 참가자 정보를 삭제하는 '완전 퇴장' 대신, 유저 정보에 'hidden' 플래그를 설정합니다.
-        if (currentUser.joinedRooms[roomId]) {
-            currentUser.joinedRooms[roomId].hidden = true; // 로컬 상태 업데이트
-            await db.collection("users").doc(myId).update({
-                [`joinedRooms.${roomId}.hidden`]: true // Firestore에 'hidden' 플래그만 업데이트
-            });
-            console.log(`✅ 방 [${roomId}]을(를) '참가중인 목록'에서 숨겼습니다.`);
-        }
-
-        // UI 정리를 위해 로비로 이동합니다. (소프트 퇴장)
-        await exitToLobby(false);
-
-    } catch (error) {
-        console.error("❌ '참가중인 목록'에서 방 숨기기 실패:", error);
-        alert("목록에서 방을 제거하는 중 오류가 발생했습니다.");
-    }
+    // [FIX] 이 버튼은 항상 "완전 퇴장"을 의미합니다.
+    exitToLobby(true);
 }
 
 /**
@@ -2603,7 +2587,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     attempts: attempts,
                     rankType: rankType,
                     status: "inprogress",
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    humanParticipantIds: [user.uid], // [신규] 생성자를 인간 참가자 목록에 추가
+                    hiddenBy: {} // [신규] '숨긴 사람' 맵 초기화
                 };
                 batch.set(roomRef, roomData);
 
@@ -2705,9 +2691,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // [신규] 방 삭제 확인 모달 버튼 이벤트
     if (btnDeleteRoomConfirm) {
-        btnDeleteRoomConfirm.onclick = async () => {
+        btnDeleteRoomConfirm.onclick = () => {
             if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.add('hidden');
-            await removeFromMyRooms();
+            // [FIX] '참가중인 목록에서 삭제'는 DB의 방을 삭제하는 것이 아니라,
+            // 내 유저 정보(joinedRooms)에서 해당 방 ID만 제거하는 기능입니다.
+            // 따라서 DB의 방을 직접 삭제하는 deleteCurrentRoom 대신 removeFromMyRooms를 호출합니다.
+            removeFromMyRooms();
         };
     }
     if (btnDeleteRoomCancel) {
