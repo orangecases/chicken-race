@@ -2400,7 +2400,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     const botId = `bot_debug_${Date.now()}`;
-                    const botData = { /* ... 봇 데이터 ... */ };
+                    const botNames = ["초보닭", "중수닭", "고수닭", "치킨런봇", "AI닭"];
+                    const botData = {
+                        id: botId,
+                        name: `${botNames[Math.floor(Math.random() * botNames.length)]}_${String(Date.now()).slice(-4)}`,
+                        isBot: true,
+                        score: 0,
+                        totalScore: 0,
+                        bestScore: 0,
+                        status: 'waiting',
+                        displayScore: 0,
+                        attemptsLeft: roomData.attempts,
+                        startDelay: 60 + Math.floor(Math.random() * 120), // 봇마다 시작 시간 다르게
+                        targetScore: 1500 + Math.floor(Math.random() * 3000) // 봇마다 목표 점수 다르게
+                    };
                     transaction.set(participantsRef.doc(botId), botData);
                     transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
                 });
