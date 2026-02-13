@@ -647,9 +647,9 @@ function handleGameOverUI() {
         // 기존에는 현재 판 점수(validScore)를 displayScore로 저장하여, 합산 점수가 아닌 마지막 점수만 표시되는 문제가 있었습니다.
         let finalDisplayScore = 0;
         if (currentRoom.rankType === 'total') {
-            finalDisplayScore = myPlayer.totalScore;
+            finalDisplayScore = (myPlayer.totalScore || 0);
         } else {
-            finalDisplayScore = myPlayer.bestScore;
+            finalDisplayScore = (myPlayer.bestScore || 0);
         }
 
         if (myPlayer.attemptsLeft > 0) { // 남은 시도 횟수가 있을 경우
@@ -724,7 +724,8 @@ function handleMultiplayerTick() {
 
     // 2. 플레이어 자신의 로컬 점수를 즉시 업데이트합니다. (UI 반응성용)
     const myPlayer = multiGamePlayers.find(p => p.id === myId);
-    if (myPlayer && gameState === STATE.PLAYING) {
+    // [FIX] playing 뿐만 아니라 crashed 상태에서도 점수 동기화 (onSnapshot으로 객체가 교체되어도 점수 유지)
+    if (myPlayer && (gameState === STATE.PLAYING || gameState === STATE.CRASHED)) {
         myPlayer.score = score;
     }
 
@@ -734,16 +735,24 @@ function handleMultiplayerTick() {
         const batch = db.batch();
 
         // 3a. 내 정보 업데이트 (내가 플레이 중일 때만)
-        if (myPlayer && myPlayer.status === 'playing') {
+        // [FIX] CRASHED 상태에서도 업데이트 허용 (status는 로컬에서 아직 playing일 수 있음)
+        if (myPlayer && (myPlayer.status === 'playing' || myPlayer.status === 'waiting')) {
             const myDocRef = participantsRef.doc(myId);
-            const displayScore = (currentRoom.rankType === 'total')
-                ? (myPlayer.totalScore || 0) + myPlayer.score
-                : Math.max((myPlayer.bestScore || 0), myPlayer.score);
             
-            batch.update(myDocRef, {
-                displayScore: Math.floor(displayScore),
-                status: 'playing'
-            });
+            // [FIX] NaN 방지: myPlayer.score가 undefined일 경우 0 처리
+            const currentRunScore = (typeof myPlayer.score === 'number' && !isNaN(myPlayer.score)) ? myPlayer.score : 0;
+            
+            const displayScore = (currentRoom.rankType === 'total')
+                ? (myPlayer.totalScore || 0) + currentRunScore
+                : Math.max((myPlayer.bestScore || 0), currentRunScore);
+            
+            // NaN 체크 후 업데이트
+            if (!isNaN(displayScore)) {
+                batch.update(myDocRef, {
+                    displayScore: Math.floor(displayScore),
+                    status: 'playing'
+                });
+            }
         }
 
         // 3b. 봇 정보 업데이트 (방장만 수행)
@@ -1329,6 +1338,10 @@ async function exitToLobby() { // Make exitToLobby async
                             }
                         }
                         transaction.update(roomRef, updates);
+                        
+                        // [FIX] 참가자 목록(participants)에서 자신을 제거합니다. (유령 참가자 방지)
+                        const myParticipantRef = roomRef.collection('participants').doc(currentUser.id);
+                        transaction.delete(myParticipantRef);
                     }
                 });
 
