@@ -1357,6 +1357,10 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
     currentRoom = null; // 현재 방 컨텍스트 초기화
     
     updateCoinUI();
+
+    // [FIX] 방 퇴장 후 목록이 갱신되지 않는 문제 해결:
+    // fetchRaceRooms가 캐시된 Promise를 반환하지 않고 강제로 새로고침하도록 Promise를 초기화합니다.
+    roomFetchPromise = null;
     await fetchRaceRooms(false);
     fetchMyRooms();
 
@@ -1578,6 +1582,9 @@ function renderRoomLists(refreshSnapshot = false) {
     raceRoomList.innerHTML = '';
     myRoomList.innerHTML = '';
 
+    // [FIX] 사용자가 참가한 모든 방의 ID 목록을 미리 만듭니다. (레이스룸 목록에서 중복 제외용)
+    const allMyJoinedRoomIds = (isLoggedIn && currentUser && currentUser.joinedRooms) ? Object.keys(currentUser.joinedRooms) : [];
+
     raceRooms.forEach(room => {
         // [수정] isFinished 상태를 사용자별 데이터(joinedRooms) 기준으로 판단
         const userRoomState = (isLoggedIn && currentUser && currentUser.joinedRooms) ? currentUser.joinedRooms[room.id] : null;
@@ -1590,8 +1597,9 @@ function renderRoomLists(refreshSnapshot = false) {
         const debugButtonsHTML = `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`;
 
         // 1. 레이스룸 목록 (공개):
-        // [수정] 스냅샷에 포함된 방만 렌더링 (실시간 필터링 X -> 상태만 업데이트)
-        if (raceRoomSnapshot.includes(room.id)) {
+        // [FIX] 스냅샷에 포함되고, 사용자가 한 번도 참가한 적 없는 방만 렌더링합니다.
+        // 이렇게 하면 '참가중인 목록'에서 숨긴 방이 여기에 다시 나타나지 않습니다.
+        if (raceRoomSnapshot.includes(room.id) && !allMyJoinedRoomIds.includes(room.id)) {
             const raceLi = document.createElement('li');
 
             // [FIX] 'already-joined' 스타일이 방 생성 직후에도 적용되는 문제 수정
@@ -1646,7 +1654,8 @@ function renderRoomLists(refreshSnapshot = false) {
     // [수정] 참가중인 방 목록 렌더링 (myRooms 배열 사용)
     myRooms.forEach(room => {
         const userRoomState = (isLoggedIn && currentUser && currentUser.joinedRooms) ? currentUser.joinedRooms[room.id] : null;
-        if (userRoomState) {
+        // [FIX] 사용자가 '목록에서 삭제'하여 숨김 처리한 방은 렌더링하지 않습니다.
+        if (userRoomState && !userRoomState.hidden) {
             const rankTypeText = room.rankType === 'total' ? '합산점' : '최고점';
             // [신규] 디버깅용 봇 추가/삭제 버튼 HTML
             const debugButtonsHTML = `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`;
@@ -1979,15 +1988,34 @@ async function deleteCurrentRoom() {
  * 기존 deleteCurrentRoom은 방 자체를 DB에서 삭제하여 모든 참가자에게 영향을 주는 버그가 있었습니다.
  * 이 함수는 현재 로그인한 유저의 '참가 목록'에서만 방을 제거합니다.
  */
-function removeFromMyRooms() {
+async function removeFromMyRooms() {
     if (!currentRoom || !currentRoom.id || !currentUser) {
         console.warn("목록에서 제거할 방 정보가 없습니다.");
-        exitToLobby(false);
+        await exitToLobby(false);
         return;
     }
 
-    // [FIX] 이 버튼은 항상 "완전 퇴장"을 의미합니다.
-    exitToLobby(true);
+    const roomId = currentRoom.id;
+    const myId = currentUser.id;
+
+    try {
+        // [FIX] '참가중인 목록에서 삭제'는 참가 기록(점수)은 유지하되, 목록에서만 숨기는 기능입니다.
+        // 따라서 참가자 정보를 삭제하는 '완전 퇴장' 대신, 유저 정보에 'hidden' 플래그를 설정합니다.
+        if (currentUser.joinedRooms[roomId]) {
+            currentUser.joinedRooms[roomId].hidden = true; // 로컬 상태 업데이트
+            await db.collection("users").doc(myId).update({
+                [`joinedRooms.${roomId}.hidden`]: true // Firestore에 'hidden' 플래그만 업데이트
+            });
+            console.log(`✅ 방 [${roomId}]을(를) '참가중인 목록'에서 숨겼습니다.`);
+        }
+
+        // UI 정리를 위해 로비로 이동합니다. (소프트 퇴장)
+        await exitToLobby(false);
+
+    } catch (error) {
+        console.error("❌ '참가중인 목록'에서 방 숨기기 실패:", error);
+        alert("목록에서 방을 제거하는 중 오류가 발생했습니다.");
+    }
 }
 
 /**
@@ -2677,12 +2705,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // [신규] 방 삭제 확인 모달 버튼 이벤트
     if (btnDeleteRoomConfirm) {
-        btnDeleteRoomConfirm.onclick = () => {
+        btnDeleteRoomConfirm.onclick = async () => {
             if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.add('hidden');
-            // [FIX] '참가중인 목록에서 삭제'는 DB의 방을 삭제하는 것이 아니라,
-            // 내 유저 정보(joinedRooms)에서 해당 방 ID만 제거하는 기능입니다.
-            // 따라서 DB의 방을 직접 삭제하는 deleteCurrentRoom 대신 removeFromMyRooms를 호출합니다.
-            removeFromMyRooms();
+            await removeFromMyRooms();
         };
     }
     if (btnDeleteRoomCancel) {
