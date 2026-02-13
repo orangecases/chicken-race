@@ -757,45 +757,58 @@ function handleMultiplayerTick() {
 
         // 3b. 봇 정보 업데이트 (방장만 수행)
         if (isHost) {
-            multiGamePlayers.forEach(p => {
-                if (!p.isBot || p.status === 'dead') return;
+            // [FIX] 봇 시뮬레이션 로직을 onSnapshot에 의한 '기억상실'에 강하도록 수정합니다.
+            // 로컬 배열을 직접 수정하는 대신, 현재 상태를 읽어 다음 상태를 계산하고 서버에 업데이트합니다.
+            multiGamePlayers.forEach(bot => {
+                if (!bot.isBot || bot.status === 'dead') return;
 
-                if (p.status === 'waiting') {
-                    p.startDelay = (p.startDelay || 0) - (FIRESTORE_UPDATE_INTERVAL / 16.67); // 1초에 약 60프레임 감소
-                    if (p.startDelay <= 0) p.status = 'playing';
-                } else if (p.status === 'playing') {
-                    p.score = (p.score || 0) + baseGameSpeed * 0.05 * (p.speedFactor || 1) * (FIRESTORE_UPDATE_INTERVAL / 16.67);
-                    if (p.score >= p.targetScore) {
-                        p.attemptsLeft = (p.attemptsLeft !== undefined ? p.attemptsLeft : currentRoom.attempts) - 1;
-                        if (currentRoom.rankType === 'total') p.totalScore = (p.totalScore || 0) + p.score;
-                        else p.bestScore = Math.max((p.bestScore || 0), p.score);
-                        p.score = 0;
-                        p.targetScore = 1500 + Math.floor(Math.random() * 3000);
-                        if (p.attemptsLeft > 0) {
-                            p.status = 'waiting';
-                            p.startDelay = 60 + Math.floor(Math.random() * 120);
+                let { status, score, totalScore, bestScore, attemptsLeft, startDelay, targetScore } = bot;
+                score = score || 0;
+                totalScore = totalScore || 0;
+                bestScore = bestScore || 0;
+                startDelay = startDelay || 0;
+                targetScore = targetScore || 1500;
+                attemptsLeft = attemptsLeft !== undefined ? attemptsLeft : currentRoom.attempts;
+
+                if (status === 'waiting') {
+                    startDelay -= (FIRESTORE_UPDATE_INTERVAL / 16.67);
+                    if (startDelay <= 0) status = 'playing';
+                } else if (status === 'playing') {
+                    score += baseGameSpeed * 0.05 * (bot.speedFactor || 1) * (FIRESTORE_UPDATE_INTERVAL / 16.67);
+                    if (score >= targetScore) {
+                        attemptsLeft -= 1;
+                        if (currentRoom.rankType === 'total') totalScore += score;
+                        else bestScore = Math.max(bestScore, score);
+                        score = 0;
+                        targetScore = 1500 + Math.floor(Math.random() * 3000);
+                        if (attemptsLeft > 0) {
+                            status = 'waiting';
+                            startDelay = 60 + Math.floor(Math.random() * 120);
                         } else {
-                            p.status = 'dead';
+                            status = 'dead';
                         }
                     }
                 }
 
-                const botDocRef = participantsRef.doc(p.id);
-                const botDisplayScore = (currentRoom.rankType === 'total') ? (p.totalScore || 0) + (p.score || 0) : Math.max((p.bestScore || 0), (p.score || 0));
+                const botDisplayScore = (currentRoom.rankType === 'total') ? totalScore + score : Math.max(bestScore, score);
                 
-                // [FIX] 봇의 전체 시뮬레이션 상태를 Firestore에 기록하여 기억상실 문제를 해결합니다.
-                const updateData = {
-                    status: p.status,
-                    displayScore: Math.floor(botDisplayScore),
-                    score: p.score,
-                    totalScore: Math.floor(p.totalScore || 0),
-                    bestScore: Math.floor(p.bestScore || 0),
-                    attemptsLeft: p.attemptsLeft,
-                    startDelay: p.startDelay,
-                    targetScore: p.targetScore
-                };
+                // [FIX] NaN 점수가 데이터베이스에 기록되는 것을 방지합니다.
+                if (isNaN(botDisplayScore)) {
+                    console.error("Bot display score is NaN! Skipping update for bot:", bot.id);
+                    return;
+                }
 
-                batch.update(botDocRef, updateData);
+                const botDocRef = participantsRef.doc(bot.id);
+                batch.update(botDocRef, {
+                    status,
+                    displayScore: Math.floor(botDisplayScore),
+                    score,
+                    totalScore: Math.floor(totalScore),
+                    bestScore: Math.floor(bestScore),
+                    attemptsLeft,
+                    startDelay,
+                    targetScore
+                });
             });
         }
 
@@ -2606,12 +2619,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 2. 생성자(나)를 참가자 목록에 추가
                 const creatorRef = roomRef.collection('participants').doc(user.uid);
-                const creatorData = { id: user.uid, name: currentUser.nickname, isBot: false, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts };
+                const creatorData = { id: user.uid, name: currentUser.nickname, isBot: false, score: 0, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts };
                 batch.set(creatorRef, creatorData);
 
                 // 3. 초기 봇 1명을 참가자 목록에 추가 (방 자동 폭파 방지)
                 const botRef = roomRef.collection('participants').doc(`bot_${Date.now()}`);
-                const botData = { id: botRef.id, name: '초보닭', isBot: true, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts, startDelay: 60, targetScore: 1500 };
+                const botData = { id: botRef.id, name: '초보닭', isBot: true, score: 0, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts, startDelay: 60, targetScore: 1500 };
                 batch.set(botRef, botData);
 
                 // 4. Batch 작업 실행
