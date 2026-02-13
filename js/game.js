@@ -1287,7 +1287,7 @@ function togglePause() {
 /**
  * [신규] 게임을 종료하고 로비(인트로) 화면으로 돌아갑니다.
  */
-async function exitToLobby() { // Make exitToLobby async
+async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부를 인자로 받음
     if (unsubscribeParticipantsListener) {
         unsubscribeParticipantsListener();
         unsubscribeParticipantsListener = null;
@@ -1297,43 +1297,38 @@ async function exitToLobby() { // Make exitToLobby async
     stopBGM();
     if (gameLoopId) { cancelAnimationFrame(gameLoopId); gameLoopId = null; }
 
-    // [FIX] 유령 플레이어 문제 해결: 퇴장 로직을 통합하여 모든 경우에 서버 데이터를 정리합니다.
-    if (currentGameMode === 'multi' && currentRoom && currentUser) {
-            const roomRef = db.collection('rooms').doc(currentRoom.id);
-            const myId = currentUser.id;
-            
-            try {
-            // Get all participants first to determine the new host if needed.
-            const participantsSnapshot = await roomRef.collection('participants').get();
-            const allParticipants = participantsSnapshot.docs.map(doc => doc.data());
-            const myParticipant = allParticipants.find(p => p.id === myId);
+    // [FIX] "완전 퇴장"일 경우에만 서버 데이터를 정리합니다.
+    if (isFullExit && currentGameMode === 'multi' && currentRoom && currentUser) {
+        console.log(`🚀 방 [${currentRoom.id}]에서 완전 퇴장을 시작합니다.`);
+        const roomRef = db.collection('rooms').doc(currentRoom.id);
+        const myId = currentUser.id;
+        try {
+            // 내가 실제로 참가자인지 확인 후 트랜잭션 실행
+            const myParticipantDoc = await roomRef.collection('participants').doc(myId).get();
 
-            // Only run transaction if I am actually a participant
-            if (myParticipant) {
+            if (myParticipantDoc.exists) {
                 await db.runTransaction(async (transaction) => {
                     const roomDoc = await transaction.get(roomRef);
                     if (!roomDoc.exists) return;
 
                     const roomData = roomDoc.data();
                     const myParticipantRef = roomRef.collection('participants').doc(myId);
-
-                    // 1. Delete my participant document
+                    
+                    // 1. 참가자 목록에서 내 문서 삭제
                     transaction.delete(myParticipantRef);
 
-                    // 2. Update room document
+                    // 2. 방 인원수 감소 또는 방 삭제
                     const newPlayerCount = roomData.currentPlayers - 1;
                     if (newPlayerCount <= 0) {
-                        // Last player, delete the room
                         transaction.delete(roomRef);
                     } else {
                         const updates = { currentPlayers: firebase.firestore.FieldValue.increment(-1) };
-                        // If I am the host, find a new one
+                        // 내가 방장이었다면 방장 위임
                         if (roomData.creatorUid === myId) {
-                            const otherPlayers = allParticipants.filter(p => p.id !== myId);
+                            const participantsSnapshot = await roomRef.collection('participants').get();
+                            const otherPlayers = participantsSnapshot.docs.map(d => d.data()).filter(p => p.id !== myId);
                             if (otherPlayers.length > 0) {
-                                // Assign the first remaining player as the new host
                                 updates.creatorUid = otherPlayers[0].id;
-                                console.log(`👑 Host left. New host is ${updates.creatorUid}`);
                             }
                         }
                         transaction.update(roomRef, updates);
@@ -1341,49 +1336,32 @@ async function exitToLobby() { // Make exitToLobby async
                 });
             }
 
-            // After successful server cleanup, clean up local user data.
+            // 3. 내 유저 정보의 '참가중인 방' 목록에서 제거
             if (currentUser.joinedRooms[currentRoom.id]) {
                 const roomId = currentRoom.id;
-                const userRoomState = currentUser.joinedRooms[currentRoom.id];
-                
-                // Refund coins if they paid but never played.
-                if (userRoomState && userRoomState.isPaid) {
-                    const roomInfo = raceRooms.find(r => r.id === roomId) || myRooms.find(r => r.id === roomId) || currentRoom;
-                    if (roomInfo) {
-                        currentUser.coins += roomInfo.attempts;
-                        console.log(`코인 환불: +${roomInfo.attempts}`);
-                    }
-                }
-
-                // Remove from local and server-side joinedRooms list.
                 delete currentUser.joinedRooms[roomId];
                 await db.collection("users").doc(myId).update({
                     [`joinedRooms.${roomId}`]: firebase.firestore.FieldValue.delete()
                 });
             }
         } catch (error) {
-            console.error("❌ Error during room exit:", error);
+            console.error("❌ 완전 퇴장 처리 중 오류 발생:", error);
         }
-
-        // Reset local state
-        multiGamePlayers = [];
-        clearAutoActionTimer();
-    } else { // 싱글플레이 모드
-        clearAutoActionTimer();
-        multiGamePlayers = []; // 플레이어 목록 초기화
-        resetGame();
+    } else if (currentGameMode === 'multi') {
+        console.log(" 소프트 퇴장: 참가자 정보를 서버에 유지합니다.");
     }
-    updateCoinUI(); // [수정] 코인 환불 등이 발생할 수 있으므로 UI 업데이트
 
-    // [수정] 로비로 돌아갈 때 항상 목록을 최신 상태로 갱신하여 동기화 문제를 해결합니다.
-    await fetchRaceRooms(false); // Ensure raceRooms is updated and rendered before proceeding
-    fetchMyRooms(); // [신규] 로비로 돌아올 때 내 방 목록도 갱신
+    // --- 공통 UI 정리 및 화면 전환 ---
+    multiGamePlayers = [];
+    clearAutoActionTimer();
+    currentRoom = null; // 현재 방 컨텍스트 초기화
+    
+    updateCoinUI();
+    await fetchRaceRooms(false);
+    fetchMyRooms();
 
-    // 공통: 게임 씬을 숨기고 인트로 씬을 보여줍니다.
     document.getElementById('scene-intro').classList.remove('hidden');
     document.getElementById('scene-game').classList.add('hidden');
-
-    // 공통: 게임 UI 상태 초기화
     document.getElementById('btn-pause-toggle').classList.remove('paused');
 }
 
@@ -1836,7 +1814,7 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
         } catch (error) {
             console.error("❌ 참가자 목록 로딩 또는 리스너 설정 실패:", error);
             alert("방에 참가하는 중 오류가 발생했습니다. 로비로 돌아갑니다.");
-            exitToLobby();
+            exitToLobby(false); // 에러 시 소프트 퇴장
             return;
         }
 
@@ -1959,8 +1937,11 @@ function handleHomeButtonClick() {
         const sceneExitConfirm = document.getElementById('scene-exit-confirm');
         if (sceneExitConfirm) sceneExitConfirm.classList.remove('hidden');
     } else {
-        // 그 외(시작 전 대기, 완전 게임 오버 등)는 즉시 이동
-        exitToLobby();
+        // [FIX] 게임 시작 전/후를 구분하여 퇴장 방식 결정
+        const userRoomState = (currentUser && currentRoom) ? currentUser.joinedRooms[currentRoom.id] : null;
+        const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
+        // 게임을 시작했으면 소프트 퇴장, 시작 전이면 완전 퇴장
+        exitToLobby(!hasStartedPlaying);
     }
 }
 
@@ -1970,7 +1951,7 @@ function handleHomeButtonClick() {
 async function deleteCurrentRoom() {
     if (!currentRoom || !currentRoom.id) {
         console.warn("삭제할 방 정보가 없습니다. 로비로 이동합니다.");
-        exitToLobby();
+        exitToLobby(false);
         return;
     }
 
@@ -1986,7 +1967,7 @@ async function deleteCurrentRoom() {
         // exitToLobby()는 내부적으로 많은 로컬 정리를 수행하므로 재사용합니다.
         // exitToLobby()가 더 이상 존재하지 않는 방에 대한 로직을 수행하지 않도록 currentRoom을 null로 설정합니다.
         currentRoom = null;
-        exitToLobby();
+        exitToLobby(false);
     } catch (error) {
         console.error(`❌ 방 [${roomId}] 삭제 실패:`, error);
         alert("방을 삭제하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
@@ -1999,28 +1980,14 @@ async function deleteCurrentRoom() {
  * 이 함수는 현재 로그인한 유저의 '참가 목록'에서만 방을 제거합니다.
  */
 function removeFromMyRooms() {
-    if (!currentRoom || !currentRoom.id || !currentUser || !currentUser.joinedRooms) {
-        console.warn("목록에서 제거할 방 정보가 없습니다. 로비로 이동합니다.");
-        exitToLobby();
+    if (!currentRoom || !currentRoom.id || !currentUser) {
+        console.warn("목록에서 제거할 방 정보가 없습니다.");
+        exitToLobby(false);
         return;
     }
 
-    const roomId = currentRoom.id;
-
-    // 1. 로컬 currentUser 객체에서 해당 방 정보를 제거합니다.
-    delete currentUser.joinedRooms[roomId];
-    console.log(`✅ 로컬 '참가중' 목록에서 방 [${roomId}] 제거 완료.`);
-
-    // 2. 변경된 유저 정보를 서버에 저장하여 '참가중' 목록을 영구적으로 업데이트합니다.
-    saveUserDataToFirestore().then(() => {
-        console.log(`✅ 서버에 '참가중' 목록 변경사항 저장 완료.`);
-        // 3. 저장이 완료된 후 로비로 이동합니다.
-        currentRoom = null; // exitToLobby에서 불필요한 로직을 수행하지 않도록 초기화
-        exitToLobby();
-    }).catch(error => {
-        console.error(`❌ '참가중' 목록 업데이트 실패:`, error);
-        alert("목록에서 방을 제거하는 중 오류가 발생했습니다.");
-    });
+    // [FIX] 이 버튼은 항상 "완전 퇴장"을 의미합니다.
+    exitToLobby(true);
 }
 
 /**
@@ -2182,11 +2149,12 @@ function resetRoomData() {
         localStorage.removeItem('chickenRunRoomStates');
         console.log('방 데이터가 초기화되었습니다. 페이지를 새로고침합니다.');
         alert('방 데이터가 초기화되었습니다. 페이지를 새로고침합니다.');
-        location.reload();
     }
 }
 
-// [신규] 구글 로그인 함수
+/**
+ * [신규] 구글 로그인 함수
+ */
 function loginWithGoogle() {
     const provider = new firebase.auth.GoogleAuthProvider();
     
@@ -2200,8 +2168,10 @@ function loginWithGoogle() {
     });
 }
 
-// [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
-// [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현
+/**
+ * [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
+ * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현
+ */
 function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
     
@@ -2258,7 +2228,9 @@ function loadUserData(user) {
     });
 }
 
-// [신규] 서버에 코인 수량만 업데이트하는 함수 (효율적)
+/**
+ * [신규] 서버에 코인 수량만 업데이트하는 함수 (효율적)
+ */
 async function syncCoinsToServer(newCoinAmount) {
     if (!currentUser) return;
     const user = firebase.auth().currentUser;
@@ -2274,7 +2246,9 @@ async function syncCoinsToServer(newCoinAmount) {
     }
 }
 
-// [신규] 유저 객체 전체를 서버에 저장하는 함수 (닉네임, 뱃지 등)
+/**
+ * [신규] 유저 객체 전체를 서버에 저장하는 함수 (닉네임, 뱃지 등)
+ */
 async function saveUserDataToFirestore() {
     if (!currentUser) return;
     const user = firebase.auth().currentUser;
@@ -2693,7 +2667,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnExitConfirm) {
         btnExitConfirm.onclick = () => {
             if (sceneExitConfirm) sceneExitConfirm.classList.add('hidden');
-            exitToLobby();
+            // [FIX] 게임 진행 중 퇴장은 '소프트 퇴장'으로 처리
+            exitToLobby(false);
         };
     }
     if (btnExitCancel) {
@@ -2915,7 +2890,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // [수정] 'HOME' 버튼 클릭 시 handleHomeButtonClick 연결 (상황에 따라 팝업 뜸)
-    if (btnExitFromStart) btnExitFromStart.onclick = exitToLobby;
+    if (btnExitFromStart) btnExitFromStart.onclick = () => exitToLobby(true);
     if (btnExitFromPause) btnExitFromPause.onclick = handleHomeButtonClick;
     if (btnExitFromGameover) btnExitFromGameover.onclick = handleHomeButtonClick;
 
