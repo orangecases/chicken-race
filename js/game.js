@@ -780,7 +780,7 @@ function handleMultiplayerTick() {
                         if (currentRoom.rankType === 'total') totalScore += score;
                         else bestScore = Math.max(bestScore, score);
                         score = 0;
-                        targetScore = 1500 + Math.floor(Math.random() * 3000);
+                        targetScore = 750 + Math.floor(Math.random() * 1500); // [수정] 봇 목표 점수 하향 조정
                         if (attemptsLeft > 0) {
                             status = 'waiting';
                             startDelay = 60 + Math.floor(Math.random() * 120);
@@ -1871,7 +1871,13 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
             document.getElementById('game-over-screen').classList.remove('hidden');
             handleGameOverUI();
             renderMultiRanking();
-            return;
+
+            // [FIX] 내가 게임오버 상태라도, 내가 방장일 경우 다른 봇들을 시뮬레이션해야 하므로 게임 루프를 실행합니다.
+            // 게임 루프는 gameState가 'gameover'일 때 플레이어 캐릭터는 움직이지 않지만, handleMultiplayerTick()은 계속 호출합니다.
+            if (gameLoopId) cancelAnimationFrame(gameLoopId);
+            gameLoop();
+
+            return; // 나머지 진입 로직은 건너뜁니다.
         }
 
         // 2. 일시정지 상태에서 재입장
@@ -2412,7 +2418,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         displayScore: 0,
                         attemptsLeft: roomData.attempts,
                         startDelay: 60 + Math.floor(Math.random() * 120), // 봇마다 시작 시간 다르게
-                        targetScore: 1500 + Math.floor(Math.random() * 3000) // 봇마다 목표 점수 다르게
+                        targetScore: 750 + Math.floor(Math.random() * 1500) // [수정] 봇 목표 점수 하향 조정
                     };
                     transaction.set(participantsRef.doc(botId), botData);
                     transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
@@ -2637,7 +2643,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 3. 초기 봇 1명을 참가자 목록에 추가 (방 자동 폭파 방지)
                 const botRef = roomRef.collection('participants').doc(`bot_${Date.now()}`);
-                const botData = { id: botRef.id, name: '초보닭', isBot: true, score: 0, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts, startDelay: 60, targetScore: 1500 };
+                const botData = { id: botRef.id, name: '초보닭', isBot: true, score: 0, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts, startDelay: 60, targetScore: 750 }; // [수정] 봇 목표 점수 하향 조정
                 batch.set(botRef, botData);
 
                 // 4. Batch 작업 실행
