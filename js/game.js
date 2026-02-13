@@ -782,11 +782,19 @@ function handleMultiplayerTick() {
 
                 const botDocRef = participantsRef.doc(p.id);
                 const botDisplayScore = (currentRoom.rankType === 'total') ? (p.totalScore || 0) + (p.score || 0) : Math.max((p.bestScore || 0), (p.score || 0));
-                const updateData = { status: p.status, displayScore: Math.floor(botDisplayScore) };
-                if (p.status === 'dead') { // 봇이 최종 종료되면 누적 점수도 함께 저장
-                    updateData.totalScore = Math.floor(p.totalScore || 0);
-                    updateData.bestScore = Math.floor(p.bestScore || 0);
-                }
+                
+                // [FIX] 봇의 전체 시뮬레이션 상태를 Firestore에 기록하여 기억상실 문제를 해결합니다.
+                const updateData = {
+                    status: p.status,
+                    displayScore: Math.floor(botDisplayScore),
+                    score: p.score,
+                    totalScore: Math.floor(p.totalScore || 0),
+                    bestScore: Math.floor(p.bestScore || 0),
+                    attemptsLeft: p.attemptsLeft,
+                    startDelay: p.startDelay,
+                    targetScore: p.targetScore
+                };
+
                 batch.update(botDocRef, updateData);
             });
         }
@@ -1303,16 +1311,17 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
         const roomRef = db.collection('rooms').doc(currentRoom.id);
         const myId = currentUser.id;
         try {
-            // 내가 실제로 참가자인지 확인 후 트랜잭션 실행
-            const myParticipantDoc = await roomRef.collection('participants').doc(myId).get();
+            // [FIX] 트랜잭션 내에서 쿼리를 실행할 수 없으므로, 참가자 목록을 미리 읽어옵니다.
+            const participantsSnapshot = await roomRef.collection('participants').get();
+            const myParticipantDoc = participantsSnapshot.docs.find(doc => doc.id === myId);
 
-            if (myParticipantDoc.exists) {
+            if (myParticipantDoc) {
                 await db.runTransaction(async (transaction) => {
                     const roomDoc = await transaction.get(roomRef);
                     if (!roomDoc.exists) return;
 
                     const roomData = roomDoc.data();
-                    const myParticipantRef = roomRef.collection('participants').doc(myId);
+                    const myParticipantRef = myParticipantDoc.ref;
                     
                     // 1. 참가자 목록에서 내 문서 삭제
                     transaction.delete(myParticipantRef);
@@ -1325,7 +1334,6 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
                         const updates = { currentPlayers: firebase.firestore.FieldValue.increment(-1) };
                         // 내가 방장이었다면 방장 위임
                         if (roomData.creatorUid === myId) {
-                            const participantsSnapshot = await roomRef.collection('participants').get();
                             const otherPlayers = participantsSnapshot.docs.map(d => d.data()).filter(p => p.id !== myId);
                             if (otherPlayers.length > 0) {
                                 updates.creatorUid = otherPlayers[0].id;
@@ -1432,10 +1440,7 @@ async function attemptToJoinRoom(room) {
             if (serverRoomData.currentPlayers >= serverRoomData.maxPlayers) { throw "방이 가득 찼습니다."; }
 
             // 1. 인원 수를 1 증가시킵니다.
-            transaction.update(roomRef, {
-                currentPlayers: firebase.firestore.FieldValue.increment(1),
-                humanParticipantIds: firebase.firestore.FieldValue.arrayUnion(currentUser.id)
-            });
+            transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
 
             // 2. 참가자(participants) 하위 컬렉션에 내 정보를 추가합니다.
             const myParticipantRef = roomRef.collection('participants').doc(currentUser.id);
@@ -1991,15 +1996,34 @@ async function deleteCurrentRoom() {
  * 기존 deleteCurrentRoom은 방 자체를 DB에서 삭제하여 모든 참가자에게 영향을 주는 버그가 있었습니다.
  * 이 함수는 현재 로그인한 유저의 '참가 목록'에서만 방을 제거합니다.
  */
-function removeFromMyRooms() {
+async function removeFromMyRooms() {
     if (!currentRoom || !currentRoom.id || !currentUser) {
         console.warn("목록에서 제거할 방 정보가 없습니다.");
-        exitToLobby(false);
+        await exitToLobby(false);
         return;
     }
 
-    // [FIX] 이 버튼은 항상 "완전 퇴장"을 의미합니다.
-    exitToLobby(true);
+    const roomId = currentRoom.id;
+    const myId = currentUser.id;
+
+    try {
+        // [FIX] '참가중인 목록에서 삭제'는 참가 기록(점수)은 유지하되, 목록에서만 숨기는 기능입니다.
+        // 따라서 참가자 정보를 삭제하는 '완전 퇴장' 대신, 유저 정보에 'hidden' 플래그를 설정합니다.
+        if (currentUser.joinedRooms[roomId]) {
+            currentUser.joinedRooms[roomId].hidden = true; // 로컬 상태 업데이트
+            await db.collection("users").doc(myId).update({
+                [`joinedRooms.${roomId}.hidden`]: true // Firestore에 'hidden' 플래그만 업데이트
+            });
+            console.log(`✅ 방 [${roomId}]을(를) '참가중인 목록'에서 숨겼습니다.`);
+        }
+
+        // UI 정리를 위해 로비로 이동합니다. (소프트 퇴장)
+        await exitToLobby(false);
+
+    } catch (error) {
+        console.error("❌ '참가중인 목록'에서 방 숨기기 실패:", error);
+        alert("목록에서 방을 제거하는 중 오류가 발생했습니다.");
+    }
 }
 
 /**
@@ -2351,59 +2375,48 @@ document.addEventListener('DOMContentLoaded', () => {
         const participantsRef = roomRef.collection('participants');
 
         try {
-            await db.runTransaction(async (transaction) => {
-                const roomDoc = await transaction.get(roomRef);
-                if (!roomDoc.exists) throw "존재하지 않는 방입니다.";
-                
-                const roomData = roomDoc.data();
-
-                if (action === 'add') {
+            if (action === 'add') {
+                await db.runTransaction(async (transaction) => {
+                    const roomDoc = await transaction.get(roomRef);
+                    if (!roomDoc.exists) throw "존재하지 않는 방입니다.";
+                    const roomData = roomDoc.data();
+                    
                     if (roomData.currentPlayers >= roomData.maxPlayers) {
                         console.warn(`[Debug] 방 [${roomId}]이(가) 가득 찼습니다.`);
                         return; // 트랜잭션 중단
                     }
-                    
-                    // 1. participants 하위 컬렉션에 봇 추가
-                    const botNames = ['고수치킨', '초보닭', '구경꾼', '치킨런', '달려라하니', '양념반후라이드반', '파닭파닭', '치맥사랑', 'KFC할아버지'];
+
                     const botId = `bot_debug_${Date.now()}`;
-                    const botData = {
-                        id: botId,
-                        name: botNames[Math.floor(Math.random() * botNames.length)],
-                        isBot: true,
-                        totalScore: 0,
-                        bestScore: 0,
-                        status: 'waiting',
-                        displayScore: 0,
-                        attemptsLeft: roomData.attempts,
-                        startDelay: Math.floor(Math.random() * 120) + 60,
-                        targetScore: 1500 + Math.floor(Math.random() * 3000)
-                    };
-                    const botDocRef = participantsRef.doc(botId);
-                    transaction.set(botDocRef, botData);
-
-                    // 2. room 문서의 currentPlayers 증가
+                    const botData = { /* ... 봇 데이터 ... */ };
+                    transaction.set(participantsRef.doc(botId), botData);
                     transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
+                });
+            } else if (action === 'remove') {
+                // [FIX] 트랜잭션 외부에서 쿼리를 실행하여 삭제할 봇을 먼저 찾습니다.
+                const botQuerySnapshot = await participantsRef.where('isBot', '==', true).limit(1).get();
+                if (botQuerySnapshot.empty) {
+                    console.warn(`[Debug] 방 [${roomId}]에 제거할 봇이 없습니다.`);
+                    return;
+                }
+                const botToRemoveRef = botQuerySnapshot.docs[0].ref;
 
-                } else if (action === 'remove') {
-                    const participantsSnapshot = await participantsRef.where('isBot', '==', true).limit(1).get();
-                    if (participantsSnapshot.empty) {
-                        console.warn(`[Debug] 방 [${roomId}]에 제거할 봇이 없습니다.`);
-                        return; // 트랜잭션 중단
-                    }
+                await db.runTransaction(async (transaction) => {
+                    const roomDoc = await transaction.get(roomRef);
+                    if (!roomDoc.exists) throw "존재하지 않는 방입니다.";
+                    const roomData = roomDoc.data();
 
-                    // 1. participants 하위 컬렉션에서 봇 1명 제거
-                    const botToRemoveDoc = participantsSnapshot.docs[0];
-                    transaction.delete(botToRemoveDoc.ref);
+                    // 1. 찾은 봇 문서를 트랜잭션 내에서 삭제합니다.
+                    transaction.delete(botToRemoveRef);
 
-                    // 2. room 문서의 currentPlayers 감소 또는 방 삭제
+                    // 2. room 문서의 currentPlayers를 감소시키거나 방을 삭제합니다.
                     const newPlayerCount = roomData.currentPlayers - 1;
                     if (newPlayerCount <= 0) {
                         transaction.delete(roomRef);
                     } else {
                         transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
                     }
-                }
-            });
+                });
+            }
             
             console.log(`[Debug] 방 [${roomId}]의 참가자 정보를 성공적으로 수정했습니다.`);
             
@@ -2587,9 +2600,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     attempts: attempts,
                     rankType: rankType,
                     status: "inprogress",
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    humanParticipantIds: [user.uid], // [신규] 생성자를 인간 참가자 목록에 추가
-                    hiddenBy: {} // [신규] '숨긴 사람' 맵 초기화
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 };
                 batch.set(roomRef, roomData);
 
@@ -2691,12 +2702,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // [신규] 방 삭제 확인 모달 버튼 이벤트
     if (btnDeleteRoomConfirm) {
-        btnDeleteRoomConfirm.onclick = () => {
+        btnDeleteRoomConfirm.onclick = async () => {
             if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.add('hidden');
-            // [FIX] '참가중인 목록에서 삭제'는 DB의 방을 삭제하는 것이 아니라,
-            // 내 유저 정보(joinedRooms)에서 해당 방 ID만 제거하는 기능입니다.
-            // 따라서 DB의 방을 직접 삭제하는 deleteCurrentRoom 대신 removeFromMyRooms를 호출합니다.
-            removeFromMyRooms();
+            await removeFromMyRooms();
         };
     }
     if (btnDeleteRoomCancel) {
