@@ -1587,6 +1587,18 @@ function renderMultiRanking() {
             statHtml = `<span class="stat">${rankDisplay}</span>`;
         }
 
+        // [요청수정] 봇 전용 컨트롤 버튼 HTML 생성
+        let botControlButtonsHTML = '';
+        if (p.isBot) {
+            botControlButtonsHTML = `
+                <div>
+                    <button class="debug-btn" data-bot-id="${p.id}" data-action="force-start">게임실행</button>
+                    <button class="debug-btn" data-bot-id="${p.id}" data-action="force-end">게임종료</button>
+                    <button class="debug-btn" data-bot-id="${p.id}" data-action="force-delete">목록삭제</button>
+                </div>
+            `;
+        }
+
         li.innerHTML = `
             <div class="${charClass}">
                 <img src="${charImg}">
@@ -1594,7 +1606,10 @@ function renderMultiRanking() {
             </div>
             <div class="info">
                 <small>${p.name} ${hostIndicatorText}</small>
-                <p class="score-display">${Math.floor(p.displayScore).toLocaleString()}<small>M</small></p>
+                <p class="score-display">
+                    <span>${Math.floor(p.displayScore).toLocaleString()}<small>M</small></span>
+                    ${botControlButtonsHTML}
+                </p>
             </div>
             ${statHtml}
         `;
@@ -2491,6 +2506,53 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('content-race-room').addEventListener('click', handleDebugBotAction, true);
     document.getElementById('content-my-rooms').addEventListener('click', handleDebugBotAction, true);
     document.getElementById('view-multi-rank').addEventListener('click', handleDebugBotAction, true);
+
+    // [요청수정] 봇 상태를 수동으로 제어하는 디버깅용 이벤트 핸들러
+    const handleBotControlAction = async (e) => {
+        const target = e.target.closest('.debug-btn[data-bot-id]');
+        if (!target || !currentRoom) return;
+
+        e.stopPropagation(); // 다른 이벤트(예: 방 입장)가 실행되는 것을 막습니다.
+
+        const botId = target.dataset.botId;
+        const action = target.dataset.action;
+        const participantRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(botId);
+
+        try {
+            switch (action) {
+                case 'force-start':
+                    console.log(`[Debug] Bot [${botId}] 강제 시작`);
+                    await participantRef.update({ status: 'playing' });
+                    break;
+                case 'force-end':
+                    console.log(`[Debug] Bot [${botId}] 강제 종료`);
+                    await participantRef.update({ status: 'dead' });
+                    break;
+                case 'force-delete':
+                    console.log(`[Debug] Bot [${botId}] 강제 삭제`);
+                    const roomRef = db.collection('rooms').doc(currentRoom.id);
+                    await db.runTransaction(async (transaction) => {
+                        const roomDoc = await transaction.get(roomRef);
+                        if (!roomDoc.exists) return;
+
+                        const roomData = roomDoc.data();
+                        const updates = { currentPlayers: firebase.firestore.FieldValue.increment(-1) };
+
+                        // 만약 방이 'finished' 상태였다면, 참가자가 삭제되므로 'inprogress'로 되돌립니다.
+                        if (roomData.status === 'finished') {
+                            updates.status = 'inprogress';
+                        }
+                        
+                        transaction.delete(participantRef);
+                        transaction.update(roomRef, updates);
+                    });
+                    break;
+            }
+        } catch (error) {
+            console.error(`[Debug] 봇 컨트롤 실패 (Action: ${action}):`, error);
+        }
+    };
+    document.getElementById('multi-score-list').addEventListener('click', handleBotControlAction);
 
     // [신규] 내 기록 목록 무한 스크롤 이벤트 리스너
     const myRecordScrollArea = document.querySelector('#content-my-record .list-scroll-area');
