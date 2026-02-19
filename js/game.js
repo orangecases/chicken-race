@@ -35,6 +35,8 @@ const FIRESTORE_UPDATE_INTERVAL = 1000; // [3단계] 1초 간격으로 업데이
 let isJumpPressed = false; // [신규] 점프 버튼 누름 상태 유지 변수
 let displayedMyRecordsCount = 20; // [신규] 내 기록 표시 개수 (무한 스크롤용)
 
+let unsubscribeInGameRoomListener = null; // [FIX] 게임 내 방 상태 실시간 동기화 리스너
+
 // [수정] 페이지네이션(Pagination) 설정: 1만개 이상의 방이 있어도 앱이 원활하게 동작하도록 합니다.
 let lastVisibleRoomDoc = null; // 마지막으로 불러온 방의 문서 참조
 let isFetchingRooms = false;   // 방 목록을 불러오는 중인지 여부 (중복 호출 방지)
@@ -1312,6 +1314,13 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
     // [FIX] 로비로 나갈 때 세션 스토리지의 활성 방 ID 제거
     sessionStorage.removeItem('activeRoomId');
 
+    // [FIX] 게임 내에서 사용하던 실시간 리스너들을 모두 확실하게 해제합니다.
+    if (unsubscribeInGameRoomListener) {
+        unsubscribeInGameRoomListener();
+        unsubscribeInGameRoomListener = null;
+        console.log("🎧 In-game Room listener detached.");
+    }
+
     if (unsubscribeParticipantsListener) {
         unsubscribeParticipantsListener();
         unsubscribeParticipantsListener = null;
@@ -1863,6 +1872,29 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
         const myPlayerId = currentUser.id;
         const roomRef = db.collection('rooms').doc(currentRoom.id);
         const participantsRef = roomRef.collection('participants');
+
+        // [FIX] 방 상태(status) 실시간 동기화 리스너 추가
+        // 이 리스너는 'finished' 상태의 방이 봇 추가/실행으로 'inprogress'가 될 때,
+        // 클라이언트의 currentRoom.status를 갱신하여 봇 시뮬레이션(handleMultiplayerTick)이 다시 동작하도록 합니다.
+        if (unsubscribeInGameRoomListener) unsubscribeInGameRoomListener();
+        unsubscribeInGameRoomListener = roomRef.onSnapshot((doc) => {
+            if (doc.exists) {
+                const serverData = doc.data();
+                // 로컬 currentRoom 객체를 최신 서버 데이터로 업데이트합니다.
+                Object.assign(currentRoom, {
+                    status: serverData.status,
+                    current: serverData.currentPlayers,
+                    creatorUid: serverData.creatorUid
+                });
+                console.log(`[Real-time] Room status updated to: ${currentRoom.status}`);
+            } else {
+                console.log("Current room was deleted from server.");
+                alert("방이 삭제되었습니다. 로비로 돌아갑니다.");
+                exitToLobby(false);
+            }
+        }, (error) => {
+            console.error("❌ Room listener error:", error);
+        });
 
         try {
             // 초기 참가자 목록을 한 번 불러옵니다.
