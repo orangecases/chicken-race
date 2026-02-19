@@ -2457,11 +2457,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const target = e.target.closest('.debug-btn');
         if (!target) return;
 
+        // [FIX] 봇 컨트롤 버튼(data-bot-id)의 이벤트가 차단되지 않도록,
+        // 방 제어 버튼(data-room-id)일 경우에만 이벤트를 처리하고 중단합니다.
+        const roomId = target.dataset.roomId;
+        if (!roomId) return;
+
         e.stopPropagation(); // 부모 li의 방 입장 이벤트가 실행되는 것을 막습니다.
 
-        const roomId = target.dataset.roomId;
         const action = target.dataset.action;
-        if (!roomId) return;
 
         const roomRef = db.collection('rooms').doc(roomId);
         const participantsRef = roomRef.collection('participants');
