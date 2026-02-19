@@ -1371,33 +1371,30 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
         } catch (error) {
             console.error("❌ 완전 퇴장 처리 중 오류 발생:", error);
         }
-    } else if (currentGameMode === 'multi') {
-    } else if (currentGameMode === 'multi' && currentRoom && currentUser) {
-        console.log(" 소프트 퇴장: 참가자 정보를 서버에 유지합니다.");
-
+    } else if (currentGameMode === 'multi' && currentRoom && currentUser) { // [FIX] 소프트 퇴장 로직 블록이 실행되지 않던 버그 수정
+        // isFullExit이 false일 때 이 블록이 실행됩니다 (소프트 퇴장).
         const myId = currentUser.id;
         const myPlayer = multiGamePlayers.find(p => p.id === myId);
         const userRoomState = currentUser.joinedRooms[currentRoom.id];
 
-        // 게임 플레이/일시정지 중에 나가는 경우, 현재 시도를 포기한 것으로 처리합니다.
+        // 게임 플레이/일시정지 중에 나가는 경우, '게임 포기'로 간주합니다.
         if (myPlayer && (myPlayer.status === 'playing' || myPlayer.status === 'paused')) {
-            // [요청수정] 게임 포기로 간주하고 모든 시도 횟수를 소진한 'dead' 상태로 변경합니다.
+            console.log("소프트 퇴장: 게임 포기로 간주하고 상태를 'dead'로 변경합니다.");
             // 1. 모든 시도 횟수를 소진한 것으로 처리
             if (userRoomState) {
                 userRoomState.usedAttempts = currentRoom.attempts;
                 await saveUserDataToFirestore(); // usedAttempts를 서버에 저장
             }
 
-            // 2. 상태를 'dead'로 강제 설정
+            // 2. Firestore에서 내 참가자 상태를 'dead'로 업데이트
             const newStatus = 'dead';
-
-            // 3. Firestore에서 내 참가자 상태 업데이트
             const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
             await participantDocRef.update({ status: newStatus });
 
-            // 4. 모든 기회를 소진했으므로 뱃지 획득 여부 확인
+            // 3. 모든 기회를 소진했으므로 뱃지 획득 여부 확인
             awardBadgeIfEligible();
-            console.log(`소프트 퇴장: 게임을 포기하고 상태를 'dead'(으)로 변경했습니다.`);
+        } else {
+            console.log("소프트 퇴장: 게임 진행 중이 아니므로 상태를 변경하지 않습니다.");
         }
     }
 
