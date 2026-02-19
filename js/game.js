@@ -2461,7 +2461,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         targetScore: 750 + Math.floor(Math.random() * 1500) // [수정] 봇 목표 점수 하향 조정
                     };
                     transaction.set(participantsRef.doc(botId), botData);
-                    transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
+                    // [FIX] 봇 추가 시 방이 finished 상태이면 inprogress로 변경합니다.
+                    const updates = { currentPlayers: firebase.firestore.FieldValue.increment(1) };
+                    if (roomData.status === 'finished') {
+                        updates.status = 'inprogress';
+                    }
+                    transaction.update(roomRef, updates);
                 });
             } else if (action === 'remove') {
                 // [FIX] 트랜잭션 외부에서 쿼리를 실행하여 삭제할 봇을 먼저 찾습니다.
@@ -2522,7 +2527,20 @@ document.addEventListener('DOMContentLoaded', () => {
             switch (action) {
                 case 'force-start':
                     console.log(`[Debug] Bot [${botId}] 강제 시작`);
-                    await participantRef.update({ status: 'playing' });
+                    // [FIX] force-start 시 방이 finished 상태이면 inprogress로 변경해야 봇 시뮬레이션이 다시 동작합니다.
+                    const roomRefForStart = db.collection('rooms').doc(currentRoom.id);
+                    await db.runTransaction(async (transaction) => {
+                        const roomDoc = await transaction.get(roomRefForStart);
+                        if (!roomDoc.exists) return;
+
+                        // 1. 봇 상태를 'playing'으로 변경
+                        transaction.update(participantRef, { status: 'playing' });
+
+                        // 2. 방 상태가 'finished'이면 'inprogress'로 변경
+                        if (roomDoc.data().status === 'finished') {
+                            transaction.update(roomRefForStart, { status: 'inprogress' });
+                        }
+                    });
                     break;
                 case 'force-end':
                     console.log(`[Debug] Bot [${botId}] 강제 종료`);
