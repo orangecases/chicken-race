@@ -1309,6 +1309,9 @@ function togglePause() {
  * [신규] 게임을 종료하고 로비(인트로) 화면으로 돌아갑니다.
  */
 async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부를 인자로 받음
+    // [FIX] 로비로 나갈 때 세션 스토리지의 활성 방 ID 제거
+    sessionStorage.removeItem('activeRoomId');
+
     if (unsubscribeParticipantsListener) {
         unsubscribeParticipantsListener();
         unsubscribeParticipantsListener = null;
@@ -1369,7 +1372,33 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
             console.error("❌ 완전 퇴장 처리 중 오류 발생:", error);
         }
     } else if (currentGameMode === 'multi') {
+    } else if (currentGameMode === 'multi' && currentRoom && currentUser) {
         console.log(" 소프트 퇴장: 참가자 정보를 서버에 유지합니다.");
+
+        const myId = currentUser.id;
+        const myPlayer = multiGamePlayers.find(p => p.id === myId);
+        const userRoomState = currentUser.joinedRooms[currentRoom.id];
+
+        // 게임 플레이/일시정지 중에 나가는 경우, 현재 시도를 포기한 것으로 처리합니다.
+        if (myPlayer && (myPlayer.status === 'playing' || myPlayer.status === 'paused')) {
+            // [요청수정] 게임 포기로 간주하고 모든 시도 횟수를 소진한 'dead' 상태로 변경합니다.
+            // 1. 모든 시도 횟수를 소진한 것으로 처리
+            if (userRoomState) {
+                userRoomState.usedAttempts = currentRoom.attempts;
+                await saveUserDataToFirestore(); // usedAttempts를 서버에 저장
+            }
+
+            // 2. 상태를 'dead'로 강제 설정
+            const newStatus = 'dead';
+
+            // 3. Firestore에서 내 참가자 상태 업데이트
+            const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
+            await participantDocRef.update({ status: newStatus });
+
+            // 4. 모든 기회를 소진했으므로 뱃지 획득 여부 확인
+            awardBadgeIfEligible();
+            console.log(`소프트 퇴장: 게임을 포기하고 상태를 'dead'(으)로 변경했습니다.`);
+        }
     }
 
     // --- 공통 UI 정리 및 화면 전환 ---
@@ -1692,12 +1721,14 @@ function renderRoomLists(refreshSnapshot = false) {
 
             if (isRoomGloballyFinished) {
                 myRoomStatusText = "종료"; // 방의 모든 플레이어가 끝남
+                myRoomStatusText = "종료";
                 myRoomStatusClass = "finished";
             } else if (isMyPlayFinished && isRoomFull) {
                 myRoomStatusText = "완료"; // 나는 끝났고, 방 인원도 다 참
                 myRoomStatusClass = "finished";
             } else {
                 myRoomStatusText = `진행중 (${room.current}/${room.limit}명)`; // 그 외 모든 경우 (내가 진행중이거나, 내가 끝났지만 방 인원이 다 안 참)
+                myRoomStatusText = `진행중 (${room.current}/${room.limit}명)`;
                 myRoomStatusClass = "inprogress";
             }
 
