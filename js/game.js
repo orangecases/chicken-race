@@ -1867,6 +1867,9 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
             // 2. 'GAME OVER' 화면을 표시하고 즉시 함수를 종료하여, '시작' 화면이 표시되지 않도록 합니다.
             resetGame();
             gameState = STATE.GAMEOVER;
+            // [FIX] 재입장 시 배경이 움직이는 버그 수정: 게임 루프는 봇 시뮬레이션을 위해 실행되지만,
+            // 화면 요소(배경 등)가 움직이지 않도록 게임 속도를 0으로 설정합니다.
+            gameSpeed = 0;
             drawStaticFrame();
             document.getElementById('game-over-screen').classList.remove('hidden');
             handleGameOverUI();
