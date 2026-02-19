@@ -1386,8 +1386,9 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
         const myPlayer = multiGamePlayers.find(p => p.id === myId);
         const userRoomState = currentUser.joinedRooms[currentRoom.id];
 
-        // 게임 플레이/일시정지 중에 나가는 경우, '게임 포기'로 간주합니다.
-        if (myPlayer && (myPlayer.status === 'playing' || myPlayer.status === 'paused')) {
+        // 게임 플레이/일시정지 중에 나가는 경우, 또는 재도전 대기 중(waiting)이라도 이미 게임을 시작한 경우(usedAttempts > 0)
+        // '게임 포기'로 간주합니다.
+        if (myPlayer && (myPlayer.status === 'playing' || myPlayer.status === 'paused' || (myPlayer.status === 'waiting' && userRoomState && userRoomState.usedAttempts > 0))) {
             console.log("소프트 퇴장: 게임 포기로 간주하고 상태를 'dead'로 변경합니다.");
             // 1. 모든 시도 횟수를 소진한 것으로 처리
             if (userRoomState) {
@@ -2586,15 +2587,18 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (!roomDoc.exists) return;
 
                         const roomData = roomDoc.data();
-                        const updates = { currentPlayers: firebase.firestore.FieldValue.increment(-1) };
+                        const newPlayerCount = roomData.currentPlayers - 1;
 
-                        // 만약 방이 'finished' 상태였다면, 참가자가 삭제되므로 'inprogress'로 되돌립니다.
-                        if (roomData.status === 'finished') {
-                            updates.status = 'inprogress';
-                        }
-                        
+                        // 1. 참가자 삭제
                         transaction.delete(participantRef);
-                        transaction.update(roomRef, updates);
+
+                        // 2. 방 인원수 감소 또는 방 삭제 (마지막 플레이어였다면 방 폭파)
+                        if (newPlayerCount <= 0) {
+                            transaction.delete(roomRef);
+                        } else {
+                            // 참가자가 남아있다면 인원수 감소 및 상태를 'inprogress'로 갱신 (시뮬레이션 재가동)
+                            transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1), status: 'inprogress' });
+                        }
                     });
                     break;
             }
