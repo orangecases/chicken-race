@@ -1711,20 +1711,14 @@ function renderRoomLists(refreshSnapshot = false) {
             const userUsedAttempts = userRoomState.usedAttempts;
             const isMyPlayFinished = userUsedAttempts >= room.attempts;
             const isRoomGloballyFinished = room.status === "finished";
-            const isRoomFull = room.current >= room.limit;
 
             let myRoomStatusText;
             let myRoomStatusClass;
 
             if (isRoomGloballyFinished) {
-                myRoomStatusText = "종료"; // 방의 모든 플레이어가 끝남
                 myRoomStatusText = "종료";
                 myRoomStatusClass = "finished";
-            } else if (isMyPlayFinished && isRoomFull) {
-                myRoomStatusText = "완료"; // 나는 끝났고, 방 인원도 다 참
-                myRoomStatusClass = "finished";
             } else {
-                myRoomStatusText = `진행중 (${room.current}/${room.limit}명)`; // 그 외 모든 경우 (내가 진행중이거나, 내가 끝났지만 방 인원이 다 안 참)
                 myRoomStatusText = `진행중 (${room.current}/${room.limit}명)`;
                 myRoomStatusClass = "inprogress";
             }
