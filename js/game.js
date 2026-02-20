@@ -10,7 +10,7 @@ const GAME_HEIGHT = 820;
 canvas.width = GAME_WIDTH;
 canvas.height = GAME_HEIGHT;
 
-const STATE = { PLAYING: 'playing', PAUSED: 'paused', CRASHED: 'crashed', GAMEOVER: 'gameover' };
+const STATE = { PLAYING: 'playing', PAUSED: 'paused', CRASHED: 'crashed', GAMEOVER: 'gameover', READY: 'ready' };
 let gameState = STATE.PLAYING;
 let gameFrame = 0;
 let score = 0;
@@ -163,7 +163,7 @@ const chicken = {
     },    
     draw() {
         let sprite;
-        if (gameState === STATE.PLAYING) {
+        if (gameState === STATE.PLAYING || gameState === STATE.READY) { // [FIX] READY 상태에서도 캐릭터 표시
             sprite = (Math.floor(gameFrame / this.frameDelay) % 2 === 0) ? images.chickenRun1 : images.chickenRun2;
         } else if (gameState === STATE.CRASHED) {
             sprite = (this.crashFrame < 15) ? images.chickenShock : images.chickenDead;
@@ -1727,7 +1727,8 @@ function renderRoomLists(refreshSnapshot = false) {
     myRooms.forEach(room => {
         const userRoomState = (isLoggedIn && currentUser && currentUser.joinedRooms) ? currentUser.joinedRooms[room.id] : null;
         // [FIX] 사용자가 '목록에서 삭제'하여 숨김 처리한 방은 렌더링하지 않습니다.
-        if (userRoomState && !userRoomState.hidden) {
+        // [요청수정] '참가중' 목록에는 실제로 게임을 시작(코인 지불)했거나 플레이한 방만 표시합니다.
+        if (userRoomState && !userRoomState.hidden && (userRoomState.isPaid || userRoomState.usedAttempts > 0)) {
             const rankTypeText = room.rankType === 'total' ? '합산점' : '최고점';
             // [신규] 디버깅용 봇 추가/삭제 버튼 HTML
             const debugButtonsHTML = `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`;
@@ -1983,12 +1984,21 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
 
         // 첫 입장이거나, 재입장 시 이전 상태 복원이 필요 없는 경우(예: 첫 시작 대기)
         resetGame();
+        
+        // [FIX] 호스트가 게임을 시작하지 않아도 봇 시뮬레이션이 동작하도록 게임 루프를 미리 실행합니다.
+        gameState = STATE.READY; 
+        gameSpeed = 0; // 배경 및 장애물 정지
+
         // [수정] 시작 대기 화면이 보일 때만 컨트롤러를 숨김
         setControlsVisibility(false);
         drawStaticFrame();
         document.getElementById('game-start-screen').classList.remove('hidden');
         startAutoActionTimer(15, 'exit', '#game-start-screen .time-message');
         renderMultiRanking(); // 랭킹 목록 갱신
+
+        // [FIX] 게임 루프 시작 (봇 시뮬레이션용)
+        if (gameLoopId) cancelAnimationFrame(gameLoopId);
+        gameLoop();
     } else { // 싱글 모드 로직 (기존과 동일)
         // [수정] 싱글 모드에서도 게임 시작 준비 화면을 띄워줍니다.
         resetGame();
@@ -2960,6 +2970,10 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => {
                 if (gameLoopId) cancelAnimationFrame(gameLoopId);
                 
+                // [FIX] READY 상태에서 PLAYING으로 전환 및 게임 속도 복구
+                gameState = STATE.PLAYING;
+                gameSpeed = baseGameSpeed;
+
                 // [3단계] 게임 시작 시 내 상태를 'playing'으로 서버에 업데이트
                 if (currentGameMode === 'multi' && currentUser) {
                     const myId = currentUser.id;
