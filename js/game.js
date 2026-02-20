@@ -1599,7 +1599,7 @@ function renderMultiRanking() {
 
         // [요청수정] 봇 전용 컨트롤 버튼 HTML 생성
         let botControlButtonsHTML = '';
-        if (p.isBot) {
+        if (p.isBot && !p.exited) {
             botControlButtonsHTML = `
                 <div>
                     <button class="debug-btn" data-bot-id="${p.id}" data-action="force-start">게임실행</button>
@@ -2109,6 +2109,19 @@ async function removeFromMyRooms() {
             console.log(`✅ 방 [${roomId}]을(를) '참가중인 목록'에서 숨겼습니다.`);
         }
 
+        // [FIX] 참가자 문서에도 'exited' 플래그를 설정하여, 방 삭제 조건(모두 퇴장 시 삭제)을 만족시키도록 합니다.
+        const roomRef = db.collection('rooms').doc(roomId);
+        await roomRef.collection('participants').doc(myId).update({ exited: true });
+
+        // [FIX] 모든 참가자가 퇴장했는지 확인하고 방 삭제
+        const participantsSnap = await roomRef.collection('participants').get();
+        const allExited = participantsSnap.docs.every(doc => doc.data().exited === true);
+        
+        if (allExited) {
+            console.log("🗑️ 모든 참가자가 퇴장하여 방을 삭제합니다.");
+            await roomRef.delete();
+        }
+
         // UI 정리를 위해 로비로 이동합니다. (소프트 퇴장)
         await exitToLobby(false);
 
@@ -2583,26 +2596,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     await participantRef.update({ status: 'dead' });
                     break;
                 case 'force-delete':
-                    console.log(`[Debug] Bot [${botId}] 강제 삭제`);
-                    const roomRef = db.collection('rooms').doc(currentRoom.id);
-                    await db.runTransaction(async (transaction) => {
-                        const roomDoc = await transaction.get(roomRef);
-                        if (!roomDoc.exists) return;
+                    console.log(`[Debug] Bot [${botId}] 목록에서 삭제 (exited 처리)`);
+                    // [FIX] 봇을 완전히 삭제하는 것이 아니라, 'exited' 상태로 변경하여 목록에서 숨김 처리한 것으로 간주합니다.
+                    await participantRef.update({ exited: true });
 
-                        const roomData = roomDoc.data();
-                        const newPlayerCount = roomData.currentPlayers - 1;
+                    // [FIX] 모든 참가자(봇 포함)가 exited 상태라면 방을 삭제합니다.
+                    const roomRefForDelete = db.collection('rooms').doc(currentRoom.id);
+                    const participantsSnap = await roomRefForDelete.collection('participants').get();
+                    const allExited = participantsSnap.docs.every(doc => doc.data().exited === true);
 
-                        // 1. 참가자 삭제
-                        transaction.delete(participantRef);
-
-                        // 2. 방 인원수 감소 또는 방 삭제 (마지막 플레이어였다면 방 폭파)
-                        if (newPlayerCount <= 0) {
-                            transaction.delete(roomRef);
-                        } else {
-                            // 참가자가 남아있다면 인원수 감소 및 상태를 'inprogress'로 갱신 (시뮬레이션 재가동)
-                            transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1), status: 'inprogress' });
-                        }
-                    });
+                    if (allExited) {
+                        console.log("🗑️ 모든 참가자가 퇴장하여 방을 삭제합니다.");
+                        await roomRefForDelete.delete();
+                    }
                     break;
             }
         } catch (error) {
