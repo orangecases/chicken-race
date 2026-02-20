@@ -2125,14 +2125,13 @@ async function removeFromMyRooms() {
     const myId = currentUser.id;
 
     try {
-        // [FIX] '참가중인 목록에서 삭제'는 참가 기록(점수)은 유지하되, 목록에서만 숨기는 기능입니다.
-        // 따라서 참가자 정보를 삭제하는 '완전 퇴장' 대신, 유저 정보에 'hidden' 플래그를 설정합니다.
+        // [요청수정] 목록에서 삭제 시, 불필요한 데이터를 남기지 않고 users 컬렉션의 joinedRooms 필드를 완전히 삭제합니다.
         if (currentUser.joinedRooms[roomId]) {
-            currentUser.joinedRooms[roomId].hidden = true; // 로컬 상태 업데이트
+            delete currentUser.joinedRooms[roomId]; // 로컬 상태 제거
             await db.collection("users").doc(myId).update({
-                [`joinedRooms.${roomId}.hidden`]: true // Firestore에 'hidden' 플래그만 업데이트
+                [`joinedRooms.${roomId}`]: firebase.firestore.FieldValue.delete() // Firestore에서 필드 삭제
             });
-            console.log(`✅ 방 [${roomId}]을(를) '참가중인 목록'에서 숨겼습니다.`);
+            console.log(`✅ 방 [${roomId}]을(를) '참가중인 목록'에서 삭제했습니다.`);
         }
 
         // [FIX] 참가자 문서에도 'exited' 플래그를 설정하여, 방 삭제 조건(모두 퇴장 시 삭제)을 만족시키도록 합니다.
