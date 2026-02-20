@@ -812,6 +812,20 @@ function handleMultiplayerTick() {
                     targetScore
                 });
             });
+        } else {
+            // [FIX] 방장이 봇이거나 없는 경우, 인간 플레이어가 방장 권한을 승계합니다.
+            const hostPlayer = multiGamePlayers.find(p => p.id === currentRoom.creatorUid);
+            if (!hostPlayer || hostPlayer.isBot) {
+                const humanPlayers = multiGamePlayers.filter(p => !p.isBot);
+                // 여러 명이 동시에 승계를 시도하는 것을 방지하기 위해 ID순으로 정렬하여 첫 번째 유저가 승계합니다.
+                humanPlayers.sort((a, b) => a.id.localeCompare(b.id));
+                
+                if (humanPlayers.length > 0 && humanPlayers[0].id === myId) {
+                    const roomRef = db.collection('rooms').doc(currentRoom.id);
+                    batch.update(roomRef, { creatorUid: myId });
+                    console.log("🤖 방장이 봇(또는 부재)이므로 방장 권한을 승계합니다.");
+                }
+            }
         }
 
         batch.commit().catch(err => console.error("Firestore 일괄 업데이트 실패:", err));
@@ -1361,7 +1375,9 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
                         if (roomData.creatorUid === myId) {
                             const otherPlayers = participantsSnapshot.docs.map(d => d.data()).filter(p => p.id !== myId);
                             if (otherPlayers.length > 0) {
-                                updates.creatorUid = otherPlayers[0].id;
+                                // [FIX] 봇보다는 사람에게 방장 권한을 우선 위임합니다.
+                                const nextHost = otherPlayers.find(p => !p.isBot) || otherPlayers[0];
+                                updates.creatorUid = nextHost.id;
                             }
                         }
                         transaction.update(roomRef, updates);
