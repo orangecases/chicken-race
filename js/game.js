@@ -516,7 +516,7 @@ function startAutoActionTimer(duration, type, selector) {
         if (timeLeft <= 0) {
             clearAutoActionTimer();
             if (type === 'exit') {
-                exitToLobby();
+                exitToLobby(true); // [FIX] 자동 퇴장 시 완전 퇴장 처리하여 방 인원수 감소 및 참가자 삭제
             } else if (type === 'deductAttempt') { // [신규] 시도 횟수 차감 로직
                 if (currentGameMode === 'multi' && currentRoom) {
                     // [수정] 사용자별 시도 횟수 차감
