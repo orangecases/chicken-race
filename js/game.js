@@ -36,7 +36,7 @@ let isJumpPressed = false; // [신규] 점프 버튼 누름 상태 유지 변수
 let displayedMyRecordsCount = 20; // [신규] 내 기록 표시 개수 (무한 스크롤용)
 
 // [신규] 슈퍼 관리자 이메일 목록 (이곳에 관리자 권한을 줄 이메일을 추가하세요)
-const ADMIN_EMAILS = ["your_email@gmail.com"]; 
+const ADMIN_EMAILS = ["orangecase018@gmail.com"]; 
 
 // [수정] 페이지네이션(Pagination) 설정: 1만개 이상의 방이 있어도 앱이 원활하게 동작하도록 합니다.
 let lastVisibleRoomDoc = null; // 마지막으로 불러온 방의 문서 참조
