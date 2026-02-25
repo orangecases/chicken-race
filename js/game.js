@@ -1560,10 +1560,11 @@ function renderMultiRanking() {
     const isTotalMode = currentRoom.rankType === 'total';
     const myId = currentUser ? currentUser.id : 'me';
     
-    // [3단계] 서버에서 실시간으로 동기화되는 displayScore를 기준으로 정렬합니다.
-    // 이렇게 하면 모든 클라이언트가 동일한 순위를 보게 됩니다.
     const sortedPlayers = [...multiGamePlayers].sort((a, b) => {
-        return (b.displayScore || 0) - (a.displayScore || 0);
+        // [FIX] 내 점수는 로컬 점수를 기준으로 정렬에 참여시켜 순위가 즉시 반영되도록 합니다.
+        const scoreA = a.id === myId ? calculateMyLocalDisplayScore() : (a.displayScore || 0);
+        const scoreB = b.id === myId ? calculateMyLocalDisplayScore() : (b.displayScore || 0);
+        return scoreB - scoreA;
     });
 
     // [신규] 모든 플레이어가 종료되었는지 확인 (방 전체 완료 여부)
@@ -1624,6 +1625,12 @@ function renderMultiRanking() {
             `;
         }
 
+        // [FIX] 내 점수는 로컬 변수에서 직접 계산하여 시차 없이 표시하고, 다른 플레이어는 서버 점수(displayScore)를 사용합니다.
+        let finalPlayerScore = p.displayScore || 0;
+        if (p.id === myId) {
+            finalPlayerScore = calculateMyLocalDisplayScore();
+        }
+
         li.innerHTML = `
             <div class="${charClass}">
                 <img src="${charImg}">
@@ -1632,7 +1639,7 @@ function renderMultiRanking() {
             <div class="info">
                 <small>${p.name} ${hostIndicatorText}</small>
                 <p class="score-display">
-                    <span>${Math.floor(p.displayScore).toLocaleString()}<small>M</small></span>
+                    <span>${Math.floor(finalPlayerScore).toLocaleString()}<small>M</small></span>
                     ${botControlButtonsHTML}
                 </p>
             </div>
@@ -1640,6 +1647,32 @@ function renderMultiRanking() {
         `;
         listEl.appendChild(li);
     });
+}
+
+/**
+ * [신규] 현재 플레이어의 로컬 점수를 실시간으로 계산하여 반환합니다.
+ * 게임 HUD 점수와 랭킹 목록의 내 점수를 동기화하는 데 사용됩니다.
+ * @returns {number} 계산된 현재 플레이어의 최종 점수
+ */
+function calculateMyLocalDisplayScore() {
+    if (!currentUser || !currentRoom) return 0;
+
+    const myId = currentUser.id;
+    const myPlayer = multiGamePlayers.find(p => p.id === myId);
+    if (!myPlayer) return 0;
+
+    // 현재 게임이 진행 중(PLAYING, CRASHED)일 때의 실시간 점수
+    const currentRunScore = (gameState === STATE.PLAYING || gameState === STATE.CRASHED) ? score : 0;
+
+    let displayScore = 0;
+    if (currentRoom.rankType === 'total') {
+        // 합산 모드: 누적 점수 + 현재 판의 점수
+        displayScore = (myPlayer.totalScore || 0) + currentRunScore;
+    } else {
+        // 최고점 모드: 기존 최고점과 현재 판의 점수 중 더 큰 값
+        displayScore = Math.max((myPlayer.bestScore || 0), currentRunScore);
+    }
+    return displayScore;
 }
 
 let raceRoomSnapshot = [];
