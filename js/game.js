@@ -2302,15 +2302,21 @@ function loadUserData(user) {
             // 기존 유저: 서버 데이터 사용
             console.log("🔔 서버 데이터 변경 감지!");
             const serverData = doc.data();
+
+            // [수정] 관리자 권한 체크 로직 강화 (대소문자/공백 무시)
+            const userEmail = (serverData.email || user.email || '').trim().toLowerCase();
+            const isAdminUser = ADMIN_EMAILS.some(adminEmail => adminEmail.trim().toLowerCase() === userEmail);
+
             // [FIX] 데이터 무결성 보장: 서버에서 필드가 누락된 경우(예: 수동 삭제) 기본값으로 초기화합니다.
             // 이 처리를 통해 `joinedRooms`가 undefined가 되어 발생하는 'TypeError'를 방지합니다.
             currentUser = {
                 ...serverData,
                 joinedRooms: serverData.joinedRooms || {},
                 badges: serverData.badges || { '1': 0, '2': 0, '3': 0 },
-                    coins: serverData.coins !== undefined ? serverData.coins : 10,
-                    isAdmin: ADMIN_EMAILS.includes(serverData.email || user.email) // [신규] 관리자 여부 설정
+                coins: serverData.coins !== undefined ? serverData.coins : 10,
+                isAdmin: isAdminUser // [수정] 강화된 관리자 체크 결과 적용
             };
+            console.log(`[Auth] User: ${userEmail}, IsAdmin: ${isAdminUser}`); // 디버깅 로그
             isLoggedIn = true;
             
             // 로그인 성공 후 공통 UI 처리
@@ -2319,6 +2325,7 @@ function loadUserData(user) {
             
             updateCoinUI();
             // [FIX] 로그인 시에도 fetchRaceRooms()를 호출하여 데이터 로딩과 UI 렌더링 순서를 보장합니다.
+            roomFetchPromise = null; // [신규] 권한 변경 반영을 위해 목록 재로딩
             fetchRaceRooms(false);
             fetchMyRooms(); // [신규] 로그인 시 내 방 목록 데이터 로드
             // 프로필 모달이 열려있다면 갱신
@@ -2392,6 +2399,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 원인: 로그인 상태 변경 시, 방 목록 데이터(raceRooms)를 다시 가져오지 않고
             //       UI 렌더링 함수(renderRoomLists)만 호출하여, 비어있는 데이터로 목록이 그려지는 레이스 컨디션이 있었습니다.
             // 해결: 로그인/로그아웃 시 항상 fetchRaceRooms()를 호출하여 데이터를 먼저 가져온 후 UI를 그리도록 순서를 보장합니다.
+            roomFetchPromise = null; // [신규] 권한 변경 반영을 위해 목록 재로딩
             fetchRaceRooms(false);
             fetchMyRooms(); // [신규] 내 방 목록도 갱신 (비움)
             
