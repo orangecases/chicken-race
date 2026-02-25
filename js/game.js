@@ -517,7 +517,8 @@ function startAutoActionTimer(duration, type, selector) {
         if (timeLeft <= 0) {
             clearAutoActionTimer();
             if (type === 'exit') {
-                exitToLobby();
+                // [FIX] 시작 화면 타임아웃은 '완전 퇴장'으로 처리해야 합니다.
+                exitToLobby(true);
             } else if (type === 'deductAttempt') { // [신규] 시도 횟수 차감 로직
                 if (currentGameMode === 'multi' && currentRoom) {
                     // [수정] 사용자별 시도 횟수 차감
