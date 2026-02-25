@@ -10,7 +10,7 @@ const GAME_HEIGHT = 820;
 canvas.width = GAME_WIDTH;
 canvas.height = GAME_HEIGHT;
 
-const STATE = { PLAYING: 'playing', PAUSED: 'paused', CRASHED: 'crashed', GAMEOVER: 'gameover' };
+const STATE = { IDLE: 'idle', PLAYING: 'playing', PAUSED: 'paused', CRASHED: 'crashed', GAMEOVER: 'gameover' };
 let gameState = STATE.PLAYING;
 let gameFrame = 0;
 let score = 0;
@@ -544,7 +544,7 @@ function startAutoActionTimer(duration, type, selector) {
 
 function resetGame() {
     clearAutoActionTimer(); // [신규] 타이머 초기화
-    gameState = STATE.PLAYING; 
+    gameState = STATE.IDLE; // [수정] 초기 상태를 IDLE(대기)로 설정하여 봇 시뮬레이션만 수행
     stopBGM(); // [신규] 리셋 시 BGM 정지 (시작 버튼 누를 때 재생)
     baseGameSpeed = 15; // [수정] 기본 속도 상향 (10 -> 12)
     gameSpeed = baseGameSpeed; 
@@ -723,7 +723,6 @@ function handleMultiplayerTick() {
     const now = Date.now();
     const myId = currentUser.id;
     const isHost = currentUser.id === currentRoom.creatorUid;
-    const isAdmin = currentUser && currentUser.isAdmin; // [신규] 관리자 여부 확인
     const participantsRef = db.collection('rooms').doc(currentRoom.id).collection('participants');
 
     // 2. 플레이어 자신의 로컬 점수를 즉시 업데이트합니다. (UI 반응성용)
@@ -759,8 +758,8 @@ function handleMultiplayerTick() {
             }
         }
 
-        // 3b. 봇 정보 업데이트 (방장 또는 관리자 수행)
-        if (isHost || isAdmin) {
+        // 3b. 봇 정보 업데이트 (방장만 수행)
+        if (isHost) {
             // [FIX] 봇 시뮬레이션 로직을 onSnapshot에 의한 '기억상실'에 강하도록 수정합니다.
             // 로컬 배열을 직접 수정하는 대신, 현재 상태를 읽어 다음 상태를 계산하고 서버에 업데이트합니다.
             multiGamePlayers.forEach(bot => {
@@ -828,6 +827,19 @@ function handleMultiplayerTick() {
 }
 
 function gameLoop() {
+    // [신규] IDLE 상태: 게임 시작 전 대기 상태 (봇 시뮬레이션은 계속 수행)
+    if (gameState === STATE.IDLE) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        skyBg.draw(0); floorBg.draw(GAME_HEIGHT - 124);
+        dog.draw(); chicken.draw(); // 정적 그리기
+        
+        // [핵심] 대기 상태에서도 멀티플레이 로직(봇 점수 계산 등)은 계속 실행되어야 함
+        handleMultiplayerTick();
+        
+        gameLoopId = requestAnimationFrame(gameLoop);
+        return;
+    }
+
     if (gameState === STATE.PLAYING) {        
         // 1. 부스트 보너스 계산 (하이리스크 하이리턴)
         let boostBonus = 0;
@@ -1593,7 +1605,7 @@ function renderMultiRanking() {
 
         // [요청수정] 봇 전용 컨트롤 버튼 HTML 생성
         let botControlButtonsHTML = '';
-        if (currentUser && currentUser.isAdmin && p.isBot && !p.exited) { // [수정] 관리자만 봇 컨트롤 가능
+        if (currentUser && currentUser.isAdmin && p.isBot) { // [수정] 관리자만 봇 컨트롤 가능 (!p.exited 조건 제거)
             botControlButtonsHTML = `
                 <div>
                     <button class="debug-btn" data-bot-id="${p.id}" data-action="force-start">게임실행</button>
@@ -1868,6 +1880,12 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
 
     // --- 멀티플레이어 모드 로직 ---
     if (mode === 'multi') {
+        // [신규] 멀티플레이 모드에서는 진입 즉시 게임 루프를 실행하여 봇 상태를 동기화합니다.
+        // 게임 시작 전(IDLE)이라도 봇 시뮬레이션은 돌아야 하기 때문입니다.
+        if (!gameLoopId) {
+            gameLoop();
+        }
+
         // [FIX] 참가자 등록 로직을 enterGameScene에서 제거하고, 방 생성/참가 함수로 이전합니다.
         // enterGameScene은 이제 서버에 있는 참가자 목록을 그대로 읽어와 화면을 그리는 역할만 담당합니다.
         const myPlayerId = currentUser.id;
@@ -2937,6 +2955,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setControlsVisibility(true); // [수정] 게임 시작 시 컨트롤러 표시
             // 0.5초 애니메이션 간격 후 게임 시작
             setTimeout(() => {
+                // [수정] 루프를 새로 시작하는 대신 상태를 변경하여 게임 진행
                 if (gameLoopId) cancelAnimationFrame(gameLoopId);
                 
                 // [3단계] 게임 시작 시 내 상태를 'playing'으로 서버에 업데이트
@@ -3004,6 +3023,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 playSound('start');
                 playSound('bgm'); 
+                gameState = STATE.PLAYING; // [핵심] 상태를 PLAYING으로 변경하여 게임 시작
                 gameLoop();
             }, 500);
         };
