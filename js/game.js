@@ -35,6 +35,9 @@ const FIRESTORE_UPDATE_INTERVAL = 1000; // [3단계] 1초 간격으로 업데이
 let isJumpPressed = false; // [신규] 점프 버튼 누름 상태 유지 변수
 let displayedMyRecordsCount = 20; // [신규] 내 기록 표시 개수 (무한 스크롤용)
 
+// [신규] 슈퍼 관리자 이메일 목록 (이곳에 관리자 권한을 줄 이메일을 추가하세요)
+const ADMIN_EMAILS = ["your_email@gmail.com"]; 
+
 // [수정] 페이지네이션(Pagination) 설정: 1만개 이상의 방이 있어도 앱이 원활하게 동작하도록 합니다.
 let lastVisibleRoomDoc = null; // 마지막으로 불러온 방의 문서 참조
 let isFetchingRooms = false;   // 방 목록을 불러오는 중인지 여부 (중복 호출 방지)
@@ -780,7 +783,7 @@ function handleMultiplayerTick() {
                         if (currentRoom.rankType === 'total') totalScore += score;
                         else bestScore = Math.max(bestScore, score);
                         score = 0;
-                        targetScore = 1500 + Math.floor(Math.random() * 3000);
+                        targetScore = 750 + Math.floor(Math.random() * 1500); // [수정] 봇 목표 점수 하향 조정
                         if (attemptsLeft > 0) {
                             status = 'waiting';
                             startDelay = 60 + Math.floor(Math.random() * 120);
@@ -1309,6 +1312,9 @@ function togglePause() {
  * [신규] 게임을 종료하고 로비(인트로) 화면으로 돌아갑니다.
  */
 async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부를 인자로 받음
+    // [FIX] 로비로 나갈 때 세션 스토리지의 활성 방 ID 제거
+    sessionStorage.removeItem('activeRoomId');
+
     if (unsubscribeParticipantsListener) {
         unsubscribeParticipantsListener();
         unsubscribeParticipantsListener = null;
@@ -1368,8 +1374,31 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
         } catch (error) {
             console.error("❌ 완전 퇴장 처리 중 오류 발생:", error);
         }
-    } else if (currentGameMode === 'multi') {
-        console.log(" 소프트 퇴장: 참가자 정보를 서버에 유지합니다.");
+    } else if (currentGameMode === 'multi' && currentRoom && currentUser) { // [FIX] 소프트 퇴장 로직 블록이 실행되지 않던 버그 수정
+        // isFullExit이 false일 때 이 블록이 실행됩니다 (소프트 퇴장).
+        const myId = currentUser.id;
+        const myPlayer = multiGamePlayers.find(p => p.id === myId);
+        const userRoomState = currentUser.joinedRooms[currentRoom.id];
+
+        // 게임 플레이/일시정지 중에 나가는 경우, '게임 포기'로 간주합니다.
+        if (myPlayer && (myPlayer.status === 'playing' || myPlayer.status === 'paused')) {
+            console.log("소프트 퇴장: 게임 포기로 간주하고 상태를 'dead'로 변경합니다.");
+            // 1. 모든 시도 횟수를 소진한 것으로 처리
+            if (userRoomState) {
+                userRoomState.usedAttempts = currentRoom.attempts;
+                await saveUserDataToFirestore(); // usedAttempts를 서버에 저장
+            }
+
+            // 2. Firestore에서 내 참가자 상태를 'dead'로 업데이트
+            const newStatus = 'dead';
+            const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
+            await participantDocRef.update({ status: newStatus });
+
+            // 3. 모든 기회를 소진했으므로 뱃지 획득 여부 확인
+            awardBadgeIfEligible();
+        } else {
+            console.log("소프트 퇴장: 게임 진행 중이 아니므로 상태를 변경하지 않습니다.");
+        }
     }
 
     // --- 공통 UI 정리 및 화면 전환 ---
@@ -1561,6 +1590,18 @@ function renderMultiRanking() {
             statHtml = `<span class="stat">${rankDisplay}</span>`;
         }
 
+        // [요청수정] 봇 전용 컨트롤 버튼 HTML 생성
+        let botControlButtonsHTML = '';
+        if (currentUser && currentUser.isAdmin && p.isBot && !p.exited) { // [수정] 관리자만 봇 컨트롤 가능
+            botControlButtonsHTML = `
+                <div>
+                    <button class="debug-btn" data-bot-id="${p.id}" data-action="force-start">게임실행</button>
+                    <button class="debug-btn" data-bot-id="${p.id}" data-action="force-end">게임종료</button>
+                    <button class="debug-btn" data-bot-id="${p.id}" data-action="force-delete">목록삭제</button>
+                </div>
+            `;
+        }
+
         li.innerHTML = `
             <div class="${charClass}">
                 <img src="${charImg}">
@@ -1568,7 +1609,10 @@ function renderMultiRanking() {
             </div>
             <div class="info">
                 <small>${p.name} ${hostIndicatorText}</small>
-                <p class="score-display">${Math.floor(p.displayScore).toLocaleString()}<small>M</small></p>
+                <p class="score-display">
+                    <span>${Math.floor(p.displayScore).toLocaleString()}<small>M</small></span>
+                    ${botControlButtonsHTML}
+                </p>
             </div>
             ${statHtml}
         `;
@@ -1615,7 +1659,9 @@ function renderRoomLists(refreshSnapshot = false) {
         const lockImg = room.isLocked ? `<img class="lock" src="assets/images/icon_lock.png">` : '';
         
         // [신규] 디버깅용 봇 추가/삭제 버튼 HTML
-        const debugButtonsHTML = `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`;
+        const debugButtonsHTML = (currentUser && currentUser.isAdmin) 
+            ? `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`
+            : '';
 
         // 1. 레이스룸 목록 (공개):
         // [FIX] 스냅샷에 포함되고, 사용자가 한 번도 참가한 적 없는 방만 렌더링합니다.
@@ -1679,25 +1725,23 @@ function renderRoomLists(refreshSnapshot = false) {
         if (userRoomState && !userRoomState.hidden) {
             const rankTypeText = room.rankType === 'total' ? '합산점' : '최고점';
             // [신규] 디버깅용 봇 추가/삭제 버튼 HTML
-            const debugButtonsHTML = `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`;
+            const debugButtonsHTML = (currentUser && currentUser.isAdmin)
+                ? `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`
+                : '';
 
             // [FIX] userUsedAttempts 변수가 정의되지 않아 렌더링이 중단되는 오류 수정
             const userUsedAttempts = userRoomState.usedAttempts;
             const isMyPlayFinished = userUsedAttempts >= room.attempts;
             const isRoomGloballyFinished = room.status === "finished";
-            const isRoomFull = room.current >= room.limit;
 
             let myRoomStatusText;
             let myRoomStatusClass;
 
             if (isRoomGloballyFinished) {
-                myRoomStatusText = "종료"; // 방의 모든 플레이어가 끝남
-                myRoomStatusClass = "finished";
-            } else if (isMyPlayFinished && isRoomFull) {
-                myRoomStatusText = "완료"; // 나는 끝났고, 방 인원도 다 참
+                myRoomStatusText = "종료";
                 myRoomStatusClass = "finished";
             } else {
-                myRoomStatusText = `진행중 (${room.current}/${room.limit}명)`; // 그 외 모든 경우 (내가 진행중이거나, 내가 끝났지만 방 인원이 다 안 참)
+                myRoomStatusText = `진행중 (${room.current}/${room.limit}명)`;
                 myRoomStatusClass = "inprogress";
             }
 
@@ -1764,15 +1808,8 @@ function renderRoomLists(refreshSnapshot = false) {
     }
 }
 
-async function enterGameScene(mode, roomData = null) {
+async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함수로 변경
     if (!isGameReady) { alert("리소스 로딩 중!"); return; }
-
-    // [FIX] 새로고침 후 재입장을 위해 현재 방 ID를 세션 스토리지에 저장
-    if (mode === 'multi' && roomData) {
-        sessionStorage.setItem('activeRoomId', roomData.id);
-    } else {
-        sessionStorage.removeItem('activeRoomId');
-    }
 
     // [신규] 멀티플레이 회원 전용 체크 강화
     if (mode === 'multi' && !isLoggedIn) {
@@ -1818,11 +1855,13 @@ async function enterGameScene(mode, roomData = null) {
             const oldButtons = listTitle.querySelector('.debug-btn-group');
             if (oldButtons) oldButtons.remove();
 
-            const buttonGroup = document.createElement('div');
-            buttonGroup.className = 'debug-btn-group';
-            buttonGroup.style.marginLeft = 'auto'; // 버튼을 오른쪽으로 밀기
-            buttonGroup.innerHTML = `<button class="debug-btn" data-room-id="${currentRoom.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${currentRoom.id}" data-action="remove">-</button>`;
-            listTitle.appendChild(buttonGroup);
+            if (currentUser && currentUser.isAdmin) { // [수정] 관리자만 버튼 표시
+                const buttonGroup = document.createElement('div');
+                buttonGroup.className = 'debug-btn-group';
+                buttonGroup.style.marginLeft = 'auto'; // 버튼을 오른쪽으로 밀기
+                buttonGroup.innerHTML = `<button class="debug-btn" data-room-id="${currentRoom.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${currentRoom.id}" data-action="remove">-</button>`;
+                listTitle.appendChild(buttonGroup);
+            }
         }
     }
 
@@ -1874,11 +1913,20 @@ async function enterGameScene(mode, roomData = null) {
             // 2. 'GAME OVER' 화면을 표시하고 즉시 함수를 종료하여, '시작' 화면이 표시되지 않도록 합니다.
             resetGame();
             gameState = STATE.GAMEOVER;
+            // [FIX] 재입장 시 배경이 움직이는 버그 수정: 게임 루프는 봇 시뮬레이션을 위해 실행되지만,
+            // 화면 요소(배경 등)가 움직이지 않도록 게임 속도를 0으로 설정합니다.
+            gameSpeed = 0;
             drawStaticFrame();
             document.getElementById('game-over-screen').classList.remove('hidden');
             handleGameOverUI();
             renderMultiRanking();
-            return;
+
+            // [FIX] 내가 게임오버 상태라도, 내가 방장일 경우 다른 봇들을 시뮬레이션해야 하므로 게임 루프를 실행합니다.
+            // 게임 루프는 gameState가 'gameover'일 때 플레이어 캐릭터는 움직이지 않지만, handleMultiplayerTick()은 계속 호출합니다.
+            if (gameLoopId) cancelAnimationFrame(gameLoopId);
+            gameLoop();
+
+            return; // 나머지 진입 로직은 건너뜁니다.
         }
 
         // 2. 일시정지 상태에서 재입장
@@ -2229,9 +2277,6 @@ function loginWithGoogle() {
  * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현
  */
 function loadUserData(user) {
-    // [FIX] 새로고침 시 재입장을 위한 플래그. onSnapshot 리스너가 처음 호출될 때만 true.
-    let isInitialSnapshot = true;
-
     const userRef = db.collection("users").doc(user.uid);
     
     // 기존 리스너가 있다면 해제
@@ -2239,7 +2284,7 @@ function loadUserData(user) {
         unsubscribeUserData();
     }
 
-    unsubscribeUserData = userRef.onSnapshot(async (doc) => { // [FIX] async로 변경
+    unsubscribeUserData = userRef.onSnapshot((doc) => {
         if (!doc.exists) {
             // 처음 가입한 유저: 초기 데이터 생성
             console.log("✨ 신규 유저입니다. 데이터를 초기화합니다.");
@@ -2263,56 +2308,23 @@ function loadUserData(user) {
                 ...serverData,
                 joinedRooms: serverData.joinedRooms || {},
                 badges: serverData.badges || { '1': 0, '2': 0, '3': 0 },
-                coins: serverData.coins !== undefined ? serverData.coins : 10
+                    coins: serverData.coins !== undefined ? serverData.coins : 10,
+                    isAdmin: ADMIN_EMAILS.includes(serverData.email || user.email) // [신규] 관리자 여부 설정
             };
             isLoggedIn = true;
             
-            // [FIX] 새로고침 후 자동 재입장 로직
-            if (isInitialSnapshot) {
-                isInitialSnapshot = false; // 플래그를 즉시 false로 변경하여 중복 실행 방지
-                const activeRoomId = sessionStorage.getItem('activeRoomId');
-
-                // 세션에 활성 방 ID가 있고, 유저가 실제로 해당 방에 참가중인 경우
-                if (activeRoomId && currentUser.joinedRooms && currentUser.joinedRooms[activeRoomId]) {
-                    console.log(`🔄 감지된 활성 룸 [${activeRoomId}]. 재입장을 시도합니다.`);
-                    sessionStorage.removeItem('activeRoomId'); // 사용 후 즉시 제거
-
-                    try {
-                        const roomDoc = await db.collection('rooms').doc(activeRoomId).get();
-                        if (roomDoc.exists) {
-                            const roomData = mapFirestoreDocToRoom(roomDoc);
-                            await enterGameScene('multi', roomData); // 게임 씬으로 진입
-                            return; // 로비 로딩 로직을 건너뛰기 위해 여기서 함수 실행 종료
-                        }
-                    } catch (error) {
-                        console.error("❌ 활성 룸 재입장 실패:", error);
-                        // 재입장 실패 시에는 아래의 일반 로비 로딩 로직으로 넘어감
-                    }
-                }
-                
-                // [신규] 재입장하지 않는 경우(로비 진입), 혹시 남아있을지 모르는 유령 세션을 정리합니다.
-                cleanupGhostSessions(currentUser.id, activeRoomId);
-            }
-
-            // --- 일반적인 UI 업데이트 (재입장하지 않는 경우 또는 후속 업데이트) ---
-            const isInGame = !document.getElementById('scene-game').classList.contains('hidden');
+            // 로그인 성공 후 공통 UI 처리
+            const sceneAuth = document.getElementById('scene-auth');
+            if (sceneAuth) sceneAuth.classList.add('hidden');
             
-            // 게임 중이 아닐 때만 로비 관련 UI/데이터를 로드
-            if (!isInGame) {
-                const sceneAuth = document.getElementById('scene-auth');
-                if (sceneAuth) sceneAuth.classList.add('hidden');
-                
-                updateCoinUI();
-                fetchRaceRooms(false);
-                fetchMyRooms();
-                
-                const sceneUserProfile = document.getElementById('scene-user-profile');
-                if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
-                    showUserProfile();
-                }
-            } else {
-                // 게임 중일 경우, 필요한 UI만 업데이트 (예: 코인)
-                updateCoinUI();
+            updateCoinUI();
+            // [FIX] 로그인 시에도 fetchRaceRooms()를 호출하여 데이터 로딩과 UI 렌더링 순서를 보장합니다.
+            fetchRaceRooms(false);
+            fetchMyRooms(); // [신규] 로그인 시 내 방 목록 데이터 로드
+            // 프로필 모달이 열려있다면 갱신
+            const sceneUserProfile = document.getElementById('scene-user-profile');
+            if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
+                showUserProfile();
             }
         }
     }, (error) => {
@@ -2354,49 +2366,6 @@ async function saveUserDataToFirestore() {
             console.error("❌ 유저 데이터 전체 저장 실패:", error);
         }
     }
-}
-
-/**
- * [신규] 유령 세션 정리 함수
- * 로비에 진입했을 때, 내가 참가자 목록에 남아있는 방이 있다면(재입장 대상 제외) 강제로 퇴장 처리합니다.
- * 이를 통해 비정상 종료(F5, 탭 닫기 등)로 인해 남은 '유령 플레이어'를 제거합니다.
- */
-async function cleanupGhostSessions(myId, activeRejoinId) {
-    if (!currentUser || !currentUser.joinedRooms) return;
-
-    const joinedRoomIds = Object.keys(currentUser.joinedRooms);
-    if (joinedRoomIds.length === 0) return;
-
-    console.log("🧹 유령 세션 점검 시작...");
-
-    // 모든 참가했던 방을 순회하며 점검 (비동기 병렬 처리)
-    const cleanupPromises = joinedRoomIds.map(async (roomId) => {
-        // 현재 재입장 중인 방은 건드리지 않음
-        if (roomId === activeRejoinId) return;
-
-        const roomRef = db.collection('rooms').doc(roomId);
-        const participantRef = roomRef.collection('participants').doc(myId);
-
-        try {
-            const doc = await participantRef.get();
-            if (doc.exists) {
-                console.log(`👻 방 [${roomId}]에서 유령 세션 발견! 정리합니다.`);
-                // 트랜잭션으로 안전하게 삭제 및 인원수 감소
-                await db.runTransaction(async (transaction) => {
-                    const roomDoc = await transaction.get(roomRef);
-                    if (!roomDoc.exists) return; // 방이 이미 없으면 패스
-                    
-                    transaction.delete(participantRef);
-                    transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
-                });
-            }
-        } catch (error) {
-            console.warn(`⚠️ 방 [${roomId}] 정리 중 오류 (무시됨):`, error);
-        }
-    });
-
-    await Promise.all(cleanupPromises);
-    console.log("✨ 유령 세션 점검 완료.");
 }
 
 // [6. 이벤트 리스너]
@@ -2462,6 +2431,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // [신규] 디버깅용 봇 추가/삭제 이벤트 핸들러 (이벤트 위임)
     // [수정] 서버 연동에 따라 Firestore 데이터를 직접 수정하도록 변경
     const handleDebugBotAction = async (e) => {
+        // [신규] 관리자가 아니면 동작하지 않음
+        if (!currentUser || !currentUser.isAdmin) return;
+
         const target = e.target.closest('.debug-btn');
         if (!target) return;
 
@@ -2499,10 +2471,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         displayScore: 0,
                         attemptsLeft: roomData.attempts,
                         startDelay: 60 + Math.floor(Math.random() * 120), // 봇마다 시작 시간 다르게
-                        targetScore: 1500 + Math.floor(Math.random() * 3000) // 봇마다 목표 점수 다르게
+                        targetScore: 750 + Math.floor(Math.random() * 1500) // [수정] 봇 목표 점수 하향 조정
                     };
                     transaction.set(participantsRef.doc(botId), botData);
-                    transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
+                    // [FIX] 봇 추가 시 방이 finished 상태이면 inprogress로 변경합니다.
+                    const updates = { currentPlayers: firebase.firestore.FieldValue.increment(1) };
+                    if (roomData.status === 'finished') {
+                        updates.status = 'inprogress';
+                    }
+                    transaction.update(roomRef, updates);
                 });
             } else if (action === 'remove') {
                 // [FIX] 트랜잭션 외부에서 쿼리를 실행하여 삭제할 봇을 먼저 찾습니다.
@@ -2547,6 +2524,66 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('content-race-room').addEventListener('click', handleDebugBotAction, true);
     document.getElementById('content-my-rooms').addEventListener('click', handleDebugBotAction, true);
     document.getElementById('view-multi-rank').addEventListener('click', handleDebugBotAction, true);
+
+    // [요청수정] 봇 상태를 수동으로 제어하는 디버깅용 이벤트 핸들러
+    const handleBotControlAction = async (e) => {
+        const target = e.target.closest('.debug-btn[data-bot-id]');
+        if (!target || !currentRoom) return;
+
+        e.stopPropagation(); // 다른 이벤트(예: 방 입장)가 실행되는 것을 막습니다.
+
+        const botId = target.dataset.botId;
+        const action = target.dataset.action;
+        const participantRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(botId);
+
+        try {
+            switch (action) {
+                case 'force-start':
+                    console.log(`[Debug] Bot [${botId}] 강제 시작`);
+                    // [FIX] force-start 시 방이 finished 상태이면 inprogress로 변경해야 봇 시뮬레이션이 다시 동작합니다.
+                    const roomRefForStart = db.collection('rooms').doc(currentRoom.id);
+                    await db.runTransaction(async (transaction) => {
+                        const roomDoc = await transaction.get(roomRefForStart);
+                        if (!roomDoc.exists) return;
+
+                        // 1. 봇 상태를 'playing'으로 변경
+                        transaction.update(participantRef, { status: 'playing' });
+
+                        // 2. 방 상태가 'finished'이면 'inprogress'로 변경
+                        if (roomDoc.data().status === 'finished') {
+                            transaction.update(roomRefForStart, { status: 'inprogress' });
+                        }
+                    });
+                    break;
+                case 'force-end':
+                    console.log(`[Debug] Bot [${botId}] 강제 종료`);
+                    await participantRef.update({ status: 'dead' });
+                    break;
+                case 'force-delete':
+                    console.log(`[Debug] Bot [${botId}] 강제 삭제`);
+                    const roomRef = db.collection('rooms').doc(currentRoom.id);
+                    await db.runTransaction(async (transaction) => {
+                        const roomDoc = await transaction.get(roomRef);
+                        if (!roomDoc.exists) return;
+
+                        const roomData = roomDoc.data();
+                        const updates = { currentPlayers: firebase.firestore.FieldValue.increment(-1) };
+
+                        // 만약 방이 'finished' 상태였다면, 참가자가 삭제되므로 'inprogress'로 되돌립니다.
+                        if (roomData.status === 'finished') {
+                            updates.status = 'inprogress';
+                        }
+                        
+                        transaction.delete(participantRef);
+                        transaction.update(roomRef, updates);
+                    });
+                    break;
+            }
+        } catch (error) {
+            console.error(`[Debug] 봇 컨트롤 실패 (Action: ${action}):`, error);
+        }
+    };
+    document.getElementById('multi-score-list').addEventListener('click', handleBotControlAction);
 
     // [신규] 내 기록 목록 무한 스크롤 이벤트 리스너
     const myRecordScrollArea = document.querySelector('#content-my-record .list-scroll-area');
@@ -2724,7 +2761,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 3. 초기 봇 1명을 참가자 목록에 추가 (방 자동 폭파 방지)
                 const botRef = roomRef.collection('participants').doc(`bot_${Date.now()}`);
-                const botData = { id: botRef.id, name: '초보닭', isBot: true, score: 0, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts, startDelay: 60, targetScore: 1500 };
+                const botData = { id: botRef.id, name: '초보닭', isBot: true, score: 0, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts, startDelay: 60, targetScore: 750 }; // [수정] 봇 목표 점수 하향 조정
                 batch.set(botRef, botData);
 
                 // 4. Batch 작업 실행
@@ -3143,26 +3180,4 @@ document.addEventListener('DOMContentLoaded', () => {
     // [개발용] 콘솔에서 초기화 함수를 쉽게 호출할 수 있도록 window 객체에 할당
     window.resetAdCount = resetAdCount;
     window.resetRoomData = resetRoomData;
-
-    // [신규] 브라우저 종료/새로고침 시 퇴장 시도 (Best-effort)
-    window.addEventListener('beforeunload', () => {
-        if (currentGameMode === 'multi' && currentRoom && currentUser) {
-            // 동기적으로 처리할 수 없으므로, 비동기 요청을 보내놓고 브라우저가 처리해주길 기대합니다.
-            // (참고: 최신 브라우저에서는 beforeunload 내의 비동기 요청이 보장되지 않지만, 시도해볼 가치는 있습니다.)
-            const myId = currentUser.id;
-            const roomId = currentRoom.id;
-            
-            // 세션 스토리지에 재입장 정보가 있다면(새로고침 등), 퇴장 처리를 하지 않아야 합니다.
-            // 하지만 여기서는 '비정상 종료'를 가정하므로, 명시적인 퇴장 처리를 시도합니다.
-            // 단, F5 재입장 기능을 살리려면 이 부분은 생략하거나 신중해야 합니다.
-            // 여기서는 "F5 시 재입장" 기능이 우선이므로, activeRoomId가 세션에 있다면 삭제하지 않도록 합니다.
-            if (sessionStorage.getItem('activeRoomId') === roomId) {
-                return; 
-            }
-
-            // 정말로 떠나는 경우(탭 닫기 등)에만 삭제 시도
-            // db.collection('rooms').doc(roomId).collection('participants').doc(myId).delete();
-            // db.collection('rooms').doc(roomId).update({ currentPlayers: firebase.firestore.FieldValue.increment(-1) });
-        }
-    });
 });
