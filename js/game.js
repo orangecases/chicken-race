@@ -123,8 +123,11 @@ class ScrollingBackground {
     draw(yPosition) {
         const img = images[this.imageKey];
         if (!img || !img.complete) return;
-        this.x -= gameSpeed * this.speedRatio;
-        if (this.x <= -this.width) this.x = 0;
+        // [FIX] 게임이 'PLAYING' 상태일 때만 배경을 스크롤합니다.
+        if (gameState === STATE.PLAYING) {
+            this.x -= gameSpeed * this.speedRatio;
+            if (this.x <= -this.width) this.x = 0;
+        }
         // [수정] 이미지 루프 시 틈새가 보이지 않도록 너비를 살짝(2px) 늘려서 겹치게 그립니다.
         ctx.drawImage(img, this.x, yPosition, this.width + 2, this.height);
         ctx.drawImage(img, this.x + this.width, yPosition, this.width + 2, this.height);
@@ -168,8 +171,11 @@ const chicken = {
             sprite = (Math.floor(gameFrame / this.frameDelay) % 2 === 0) ? images.chickenRun1 : images.chickenRun2;
         } else if (gameState === STATE.CRASHED) {
             sprite = (this.crashFrame < 15) ? images.chickenShock : images.chickenDead;
-        } else {
+        } else if (gameState === STATE.GAMEOVER) {
             sprite = images.chickenDead;
+        } else {
+            // [FIX] IDLE(준비), PAUSED(일시정지) 상태에서는 기본 달리기 자세로 보이도록 수정
+            sprite = images.chickenRun1;
         }
         if (sprite && sprite.complete) ctx.drawImage(sprite, this.x, this.y, this.width, this.height);
     },
@@ -2971,6 +2977,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 playSound('start');
                 playSound('bgm'); 
+                gameState = STATE.PLAYING; // [FIX] 게임 상태를 'PLAYING'으로 변경하여 게임 로직 실행
                 gameLoop();
             }, 500);
         };
