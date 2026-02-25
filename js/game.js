@@ -730,6 +730,7 @@ function handleMultiplayerTick() {
     const now = Date.now();
     const myId = currentUser.id;
     const isHost = currentUser.id === currentRoom.creatorUid;
+    const isAdmin = currentUser && currentUser.isAdmin; // [신규] 관리자 여부 확인
     const participantsRef = db.collection('rooms').doc(currentRoom.id).collection('participants');
 
     // 2. 플레이어 자신의 로컬 점수를 즉시 업데이트합니다. (UI 반응성용)
@@ -766,7 +767,8 @@ function handleMultiplayerTick() {
         }
 
         // 3b. 봇 정보 업데이트 (방장만 수행)
-        if (isHost) {
+        // 3b. 봇 정보 업데이트 (방장 또는 관리자 수행)
+        if (isHost || isAdmin) {
             // [FIX] 봇 시뮬레이션 로직을 onSnapshot에 의한 '기억상실'에 강하도록 수정합니다.
             // 로컬 배열을 직접 수정하는 대신, 현재 상태를 읽어 다음 상태를 계산하고 서버에 업데이트합니다.
             multiGamePlayers.forEach(bot => {
