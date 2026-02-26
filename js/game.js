@@ -1279,7 +1279,11 @@ function showUserProfile() {
     const scene = document.getElementById('scene-user-profile');
     if (!scene) return;
 
-    document.getElementById('profile-id').value = currentUser.email || currentUser.id; // [수정] ID 대신 이메일 표시
+    // [FIX] currentUser가 갱신되기 전에 모달이 열리는 경우를 대비해, Firebase Auth에서 직접 이메일을 가져옵니다.
+    const authUser = firebase.auth().currentUser;
+    const displayEmail = (authUser ? authUser.email : null) || currentUser.email || currentUser.id;
+
+    document.getElementById('profile-id').value = displayEmail;
     document.getElementById('profile-nickname').value = currentUser.nickname;
     document.getElementById('badge-count-1').innerText = currentUser.badges['1'] || 0;
     document.getElementById('badge-count-2').innerText = currentUser.badges['2'] || 0;
