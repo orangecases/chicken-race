@@ -123,8 +123,8 @@ class ScrollingBackground {
     draw(yPosition) {
         const img = images[this.imageKey];
         if (!img || !img.complete) return;
-        // [FIX] 게임이 'PLAYING' 상태일 때만 배경을 스크롤합니다.
-        if (gameState === STATE.PLAYING) {
+        // [FIX] 게임이 'PLAYING' 또는 'CRASHED' 상태일 때 배경을 스크롤하여 자연스러운 감속 효과를 줍니다.
+        if (gameState === STATE.PLAYING || gameState === STATE.CRASHED) {
             this.x -= gameSpeed * this.speedRatio;
             if (this.x <= -this.width) this.x = 0;
         }
