@@ -2349,12 +2349,19 @@ function loadUserData(user) {
         if (!doc.exists) {
             // 처음 가입한 유저: 초기 데이터 생성
             console.log("✨ 신규 유저입니다. 데이터를 초기화합니다.");
+            
+            // [신규] 로그인 제공업체 확인하여 닉네임에 구분자 추가 (테스트 용이성)
+            let providerSuffix = "";
+            if (user.providerData && user.providerData.length > 0) {
+                const providerId = user.providerData[0].providerId;
+                if (providerId === 'oidc.kakao') providerSuffix = " (Kakao)";
+                else if (providerId === 'google.com') providerSuffix = " (Google)";
+            }
+
             const initialData = {
                 id: user.uid,
                 email: user.email,
-                nickname: user.displayName || '이름없음',
-                photoURL: user.photoURL,
-                // [수정] 카카오 프로필 사진이 없을 경우를 대비해 기본값 설정
+                nickname: (user.displayName || '이름없음') + providerSuffix, // [수정] 닉네임 뒤에 (Kakao) 등 표시
                 photoURL: user.photoURL || null,
                 coins: 10, // 신규 유저 보너스
                 badges: { '1': 0, '2': 0, '3': 0 },
@@ -2374,6 +2381,7 @@ function loadUserData(user) {
             // 이 처리를 통해 `joinedRooms`가 undefined가 되어 발생하는 'TypeError'를 방지합니다.
             currentUser = {
                 ...serverData,
+                email: serverData.email || user.email, // [FIX] Firestore에 이메일이 없으면 Auth 정보 사용
                 joinedRooms: serverData.joinedRooms || {},
                 badges: serverData.badges || { '1': 0, '2': 0, '3': 0 },
                 coins: serverData.coins !== undefined ? serverData.coins : 10,
