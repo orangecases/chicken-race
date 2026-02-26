@@ -2326,6 +2326,9 @@ function resetRoomData() {
  */
 function loginWithGoogle() {
     const provider = new firebase.auth.GoogleAuthProvider();
+    // [FIX] 구글 로그인 시 이메일과 프로필 정보를 명시적으로 요청합니다. (Scope 추가)
+    provider.addScope('profile');
+    provider.addScope('email');
     
     // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 감지합니다.
     firebase.auth().signInWithPopup(provider).catch((error) => {
@@ -2420,6 +2423,9 @@ function loadUserData(user) {
  */
 function loginWithKakao() {
     const provider = new firebase.auth.OAuthProvider('oidc.kakao');
+    // [FIX] 카카오 로그인 시 이메일, 프로필 정보를 명시적으로 요청합니다. (Scope 추가)
+    provider.addScope('profile');
+    provider.addScope('email');
     
     // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 자동으로 감지합니다.
     firebase.auth().signInWithPopup(provider).catch((error) => {
