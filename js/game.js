@@ -2354,6 +2354,8 @@ function loadUserData(user) {
                 email: user.email,
                 nickname: user.displayName || '이름없음',
                 photoURL: user.photoURL,
+                // [수정] 카카오 프로필 사진이 없을 경우를 대비해 기본값 설정
+                photoURL: user.photoURL || null,
                 coins: 10, // 신규 유저 보너스
                 badges: { '1': 0, '2': 0, '3': 0 },
                 joinedRooms: {}
@@ -2398,6 +2400,22 @@ function loadUserData(user) {
     }, (error) => {
         console.error("❌ 유저 데이터 로딩 실패:", error);
         alert("유저 데이터를 불러오는 중 오류가 발생했습니다.");
+    });
+}
+
+/**
+ * [신규] 카카오 OIDC 로그인 함수
+ */
+function loginWithKakao() {
+    const provider = new firebase.auth.OAuthProvider('oidc.kakao');
+    
+    // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 자동으로 감지합니다.
+    firebase.auth().signInWithPopup(provider).catch((error) => {
+        console.error("❌ 카카오 로그인 팝업 실패:", error.message);
+        // 사용자가 팝업을 닫는 등의 오류는 무시합니다.
+        if (error.code !== 'auth/popup-closed-by-user') {
+            alert("카카오 로그인 중 오류가 발생했습니다: " + error.message);
+        }
     });
 }
 
@@ -2749,7 +2767,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // [신규] SNS 로그인 버튼 시뮬레이션
     document.querySelectorAll('.sns-btn').forEach(btn => {
         btn.onclick = () => {
-            loginWithGoogle();
+            if (btn.classList.contains('google')) {
+                loginWithGoogle();
+            } else if (btn.classList.contains('kakao')) {
+                loginWithKakao();
+            } else {
+                // TODO: Naver, Facebook, YouTube 로그인 구현
+                alert('해당 로그인 방식은 현재 지원되지 않습니다.');
+            }
         };
     });
 
