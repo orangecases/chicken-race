@@ -1279,7 +1279,7 @@ function showUserProfile() {
     const scene = document.getElementById('scene-user-profile');
     if (!scene) return;
 
-    document.getElementById('profile-id').value = currentUser.email; // [수정] ID 대신 이메일 표시
+    document.getElementById('profile-id').value = currentUser.email || currentUser.id; // [수정] ID 대신 이메일 표시
     document.getElementById('profile-nickname').value = currentUser.nickname;
     document.getElementById('badge-count-1').innerText = currentUser.badges['1'] || 0;
     document.getElementById('badge-count-2').innerText = currentUser.badges['2'] || 0;
