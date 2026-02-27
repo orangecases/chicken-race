@@ -2466,21 +2466,12 @@ function loginWithKakao() {
 function loginWithNaver() {
     const provider = new firebase.auth.OAuthProvider('oidc.naver');
     
-    // 네이버 OIDC의 'sub' 불일치를 해결하기 위한 표준 스코프 세트입니다.
-    provider.addScope('openid');  // 필수
-    provider.addScope('email');   // 필수
-    provider.addScope('profile'); // 이름, 별명을 모두 포함하는 바구니
-
-    // [중요] 기존의 잘못된 인증 세션을 무시하고 새로 인증받도록 강제합니다.
-    provider.setCustomParameters({
-        'auth_type': 'reprompt'
-    });
-
+    // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 자동으로 감지합니다.
     firebase.auth().signInWithPopup(provider).catch((error) => {
-        // [TIP] 에러 발생 시 구체적인 원인을 콘솔에 더 자세히 찍어줍니다.
-        console.error("❌ 네이버 로그인 상세 에러:", error);
+        console.error("❌ 네이버 로그인 팝업 실패:", error.message);
+        // 사용자가 팝업을 닫는 등의 오류는 무시합니다.
         if (error.code !== 'auth/popup-closed-by-user') {
-            alert("로그인 실패: " + error.message);
+            alert("네이버 로그인 중 오류가 발생했습니다: " + error.message);
         }
     });
 }
