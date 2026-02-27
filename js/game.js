@@ -2365,26 +2365,27 @@ function loadUserData(user) {
     unsubscribeUserData = userRef.onSnapshot((doc) => {
         let userData;
 
-        // [FIX] 카카오 로그인(OIDC) 시 user.email이 null인 문제를 해결합니다.
-        //       Firebase Auth 객체에서 이메일을 찾기 위한 우선순위:
-        //       1. user.email (Google 등 기본 제공업체)
-        //       2. user.providerData[0].email (Kakao 등 OIDC 제공업체)
-        const extractedEmail = user.email || (user.providerData && user.providerData[0] ? user.providerData[0].email : null);
+        // [FIX] 네이버/카카오 등 다양한 로그인 제공업체의 정보를 올바르게 추출합니다.
+        //       로그인 시 사용된 제공업체의 정보(providerData[0])를 우선적으로 사용합니다.
+        const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
+        const extractedEmail = user.email || (providerInfo ? providerInfo.email : null);
+        const extractedNickname = (providerInfo ? providerInfo.displayName : null) || user.displayName;
 
         if (!doc.exists) {
             // 처음 가입한 유저: 초기 데이터 생성
             console.log("✨ 신규 유저입니다. 데이터를 초기화합니다.");
             let providerSuffix = "";
-            if (user.providerData && user.providerData.length > 0) {
-                const providerId = user.providerData[0].providerId;
+            if (providerInfo) {
+                const providerId = providerInfo.providerId;
                 if (providerId === 'oidc.kakao') providerSuffix = " (Kakao)";
                 else if (providerId === 'google.com') providerSuffix = " (Google)";
-                else if (providerId === 'oidc.naver') providerSuffix = " (Naver)"; // [신규] 네이버 로그인 접미사 추가
+                else if (providerId === 'oidc.naver') providerSuffix = " (Naver)";
             }
             userData = {
                 id: user.uid,
-                email: extractedEmail, // [FIX] providerData에서 추출한 이메일 사용
-                nickname: (user.displayName || '이름없음') + providerSuffix,
+                email: extractedEmail,
+                // [FIX] 추출한 닉네임을 사용하고, 없을 경우 '이름없음'으로 대체합니다.
+                nickname: (extractedNickname || '이름없음') + providerSuffix,
                 coins: 10, // 신규 유저 보너스
                 badges: { '1': 0, '2': 0, '3': 0 },
                 joinedRooms: {}
