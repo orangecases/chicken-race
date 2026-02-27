@@ -2466,8 +2466,11 @@ function loginWithKakao() {
 function loginWithNaver() {
     const provider = new firebase.auth.OAuthProvider('oidc.naver');
     
-    // addScope를 모두 지웁니다. 
-    // 네이버 설정에서 '이메일'만 필로 둔 상태이므로, 파이어베이스가 알아서 최소 정보만 요청하게 합니다.
+    // [FIX] 'sub' mismatch (auth/invalid-credential) 오류를 해결하기 위해,
+    // OIDC 표준 스코프인 'openid'만 명시적으로 요청합니다.
+    // 이는 Firebase가 UserInfo 엔드포인트를 호출하지 않고 ID 토큰만으로 인증을 완료하도록 유도하여,
+    // 네이버의 OIDC 구현과 발생하는 ID 불일치 문제를 회피하기 위한 시도입니다.
+    provider.addScope('openid');
 
     firebase.auth().signInWithPopup(provider).catch((error) => {
         console.error("❌ 네이버 로그인 상세 에러:", error);
