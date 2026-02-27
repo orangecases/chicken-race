@@ -2466,8 +2466,9 @@ function loginWithKakao() {
 function loginWithNaver() {
     const provider = new firebase.auth.OAuthProvider('oidc.naver');
     
-    // addScope를 모두 지웁니다. 
-    // 네이버 설정에서 '이메일'만 필로 둔 상태이므로, 파이어베이스가 알아서 최소 정보만 요청하게 합니다.
+    // [중요] 'openid' 딱 이 한 단어만 넣습니다. 
+    // 네이버가 ID 토큰을 생성할 때 이 단어가 있으면 'sub' 값을 표준에 맞게 교정해주기도 합니다.
+    provider.addScope('openid');
 
     firebase.auth().signInWithPopup(provider).catch((error) => {
         console.error("❌ 네이버 로그인 상세 에러:", error);
