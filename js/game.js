@@ -1273,13 +1273,9 @@ async function fetchMyRooms() {
 /**
  * [신규] 사용자 정보 모달을 열고 데이터를 채웁니다.
  */
-async function showUserProfile() { // [FIX] 비동기 함수로 변경
-    // [FIX] 반복되는 이메일 미표시 문제를 근본적으로 해결하기 위해,
-    //       프로필을 열 때마다 Firestore에서 최신 사용자 정보를 직접 가져오도록 로직을 전면 수정합니다.
-    //       이 방식은 실시간 리스너의 데이터 동기화 지연(경합 상태)으로 인해 발생하는 문제를 원천적으로 차단합니다.
-
-    const authUser = firebase.auth().currentUser;
-    if (!authUser) {
+function showUserProfile() {
+    // [수정] 로그인 상태는 전역 변수 currentUser로 확인합니다.
+    if (!currentUser) {
         // 로그인되지 않은 상태에서 프로필을 열려고 할 경우, 로그인 창을 띄웁니다.
         document.getElementById('scene-auth').classList.remove('hidden');
         return;
@@ -1288,36 +1284,20 @@ async function showUserProfile() { // [FIX] 비동기 함수로 변경
     const scene = document.getElementById('scene-user-profile');
     if (!scene) return;
 
-    // 1. 먼저 모달을 "로딩 중" 상태로 보여줍니다. (사용자 경험 개선)
-    document.getElementById('profile-id').value = "정보를 불러오는 중...";
-    document.getElementById('profile-nickname').value = "정보를 불러오는 중...";
+    // [리팩토링] 이제 loadUserData의 '자가 치유' 로직 덕분에 currentUser 객체는 항상 신뢰할 수 있는 최신 정보를 가집니다.
+    // 따라서 프로필을 열 때마다 Firestore에서 데이터를 다시 가져오는 복잡한 비동기 로직이 더 이상 필요하지 않습니다.
+    // 코드를 단순화하여 currentUser의 데이터를 직접 사용합니다.
+
+    document.getElementById('profile-id').value = currentUser.email || currentUser.id;
+    document.getElementById('profile-nickname').value = currentUser.nickname || '';
+    document.getElementById('badge-count-1').innerText = (currentUser.badges && currentUser.badges['1']) || 0;
+    document.getElementById('badge-count-2').innerText = (currentUser.badges && currentUser.badges['2']) || 0;
+    document.getElementById('badge-count-3').innerText = (currentUser.badges && currentUser.badges['3']) || 0;
+
+    // 프로필을 열 때 코인 정보도 최신화합니다.
+    updateCoinUI();
+
     scene.classList.remove('hidden');
-
-    try {
-        // 2. Firestore에서 최신 사용자 문서를 직접 가져옵니다.
-        const userDoc = await db.collection("users").doc(authUser.uid).get();
-        
-        let userData = userDoc.exists ? userDoc.data() : {};
-
-        // 3. 가져온 최신 정보로 모달 내용을 채웁니다.
-        //    이메일은 인증 정보 > DB 정보 > UID 순으로 우선순위를 가집니다.
-        const displayEmail = authUser.email || userData.email || authUser.uid;
-
-        document.getElementById('profile-id').value = displayEmail;
-        document.getElementById('profile-nickname').value = userData.nickname || authUser.displayName || '';
-        document.getElementById('badge-count-1').innerText = (userData.badges && userData.badges['1']) || 0;
-        document.getElementById('badge-count-2').innerText = (userData.badges && userData.badges['2']) || 0;
-        document.getElementById('badge-count-3').innerText = (userData.badges && userData.badges['3']) || 0;
-
-        // 4. 전역 currentUser 객체와 코인 UI도 최신 정보로 동기화합니다.
-        currentUser = { ...currentUser, ...userData, email: displayEmail };
-        updateCoinUI();
-
-    } catch (error) {
-        console.error("❌ 프로필 정보 조회 실패:", error);
-        alert("프로필 정보를 불러오는 데 실패했습니다.");
-        scene.classList.add('hidden'); // 오류 발생 시 모달 닫기
-    }
 }
 
 /**
