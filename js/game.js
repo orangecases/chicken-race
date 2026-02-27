@@ -2379,6 +2379,7 @@ function loadUserData(user) {
                 const providerId = user.providerData[0].providerId;
                 if (providerId === 'oidc.kakao') providerSuffix = " (Kakao)";
                 else if (providerId === 'google.com') providerSuffix = " (Google)";
+                else if (providerId === 'oidc.naver') providerSuffix = " (Naver)"; // [신규] 네이버 로그인 접미사 추가
             }
             userData = {
                 id: user.uid,
@@ -2454,6 +2455,25 @@ function loginWithKakao() {
         // 사용자가 팝업을 닫는 등의 오류는 무시합니다.
         if (error.code !== 'auth/popup-closed-by-user') {
             alert("카카오 로그인 중 오류가 발생했습니다: " + error.message);
+        }
+    });
+}
+
+/**
+ * [신규] 네이버 OIDC 로그인 함수
+ */
+function loginWithNaver() {
+    const provider = new firebase.auth.OAuthProvider('oidc.naver');
+    // 네이버에 요청할 데이터 범위(스코프) 설정
+    provider.addScope('email');
+    provider.addScope('name'); // 네이버는 'profile' 대신 'name'으로 닉네임을 요청합니다.
+    
+    // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 자동으로 감지합니다.
+    firebase.auth().signInWithPopup(provider).catch((error) => {
+        console.error("❌ 네이버 로그인 팝업 실패:", error.message);
+        // 사용자가 팝업을 닫는 등의 오류는 무시합니다.
+        if (error.code !== 'auth/popup-closed-by-user') {
+            alert("네이버 로그인 중 오류가 발생했습니다: " + error.message);
         }
     });
 }
@@ -2810,9 +2830,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 loginWithGoogle();
             } else if (btn.classList.contains('kakao')) {
                 loginWithKakao();
+            } else if (btn.classList.contains('naver')) {
+                loginWithNaver();
             } else {
-                // TODO: Naver, Facebook, YouTube 로그인 구현
-                alert('해당 로그인 방식은 현재 지원되지 않습니다.');
+                // TODO: Facebook, YouTube 로그인 구현
+                alert('해당 로그인 방식은 현재 지원되지 않습니다.'); // [수정] 네이버 제외
             }
         };
     });
