@@ -2416,19 +2416,29 @@ function loadUserData(user) {
         }
 
         // --- 공통 처리 로직 ---
+        // [FIX] 데이터베이스에 잘못된 이메일(예: UID)이 저장된 경우를 감지하고 수정하는 '자가 치유' 로직을 추가합니다.
+        //       인증 객체(user)의 이메일을 항상 최신/정확한 정보로 간주합니다.
+        const correctEmail = extractedEmail;
+        const dbEmail = userData.email;
+        const needsDbUpdate = correctEmail && (dbEmail !== correctEmail);
+
         // [수정] 관리자 식별을 이메일 대신 고유한 UID 기준으로 변경합니다.
         const isAdminUser = ADMIN_UIDS.includes(user.uid);
 
         currentUser = {
             ...userData,
-            email: userData.email || extractedEmail, // [FIX] DB에 이메일이 없을 경우, 추출한 이메일로 재설정
+            email: correctEmail || dbEmail, // [FIX] 인증 객체의 이메일을 우선 사용합니다.
             joinedRooms: userData.joinedRooms || {},
             badges: userData.badges || { '1': 0, '2': 0, '3': 0 },
             coins: userData.coins !== undefined ? userData.coins : 10,
             isAdmin: isAdminUser
         };
-        // [FIX] 콘솔 로그에서 정의되지 않은 `userEmail` 변수를 참조하여 발생하던 ReferenceError를 수정합니다.
-        // 이 오류로 인해 로그인 후의 모든 후속 처리가 중단되어, 이메일이 표시되지 않는 등 문제가 발생했습니다.
+
+        // 데이터베이스의 이메일 정보가 잘못된 경우, 올바른 정보로 업데이트합니다.
+        if (needsDbUpdate) {
+            userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
+        }
+
         console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
         isLoggedIn = true;
 
