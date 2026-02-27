@@ -2466,16 +2466,11 @@ function loginWithKakao() {
 function loginWithNaver() {
     const provider = new firebase.auth.OAuthProvider('oidc.naver');
     
-    // 네이버가 거부할 수 없는 가장 표준적인 스코프만 남깁니다.
-    provider.addScope('openid');
-    provider.addScope('email');
-
-    // [중요] 일단 reprompt 설정을 지우고 테스트해 보세요. 
-    // 팝업이 다시 뜨는지 확인하는 게 최우선입니다!
+    // addScope를 모두 지웁니다. 
+    // 네이버 설정에서 '이메일'만 필로 둔 상태이므로, 파이어베이스가 알아서 최소 정보만 요청하게 합니다.
 
     firebase.auth().signInWithPopup(provider).catch((error) => {
         console.error("❌ 네이버 로그인 상세 에러:", error);
-        alert("로그인 에러: " + error.message);
     });
 }
 
