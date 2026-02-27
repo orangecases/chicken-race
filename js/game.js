@@ -2465,10 +2465,6 @@ function loginWithKakao() {
  */
 function loginWithNaver() {
     const provider = new firebase.auth.OAuthProvider('oidc.naver');
-    // [FIX] OIDC 표준 규격인 'openid' 스코프를 명시적으로 추가하여 통신 안정성을 높입니다.
-    provider.addScope('openid');
-    // 네이버에 요청할 데이터 범위(스코프) 설정
-    provider.addScope('email');
     
     // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 자동으로 감지합니다.
     firebase.auth().signInWithPopup(provider).catch((error) => {
