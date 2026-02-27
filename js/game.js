@@ -2385,6 +2385,12 @@ function loadUserData(user) {
     unsubscribeUserData = userRef.onSnapshot((doc) => {
         let userData;
 
+        // [FIX] 카카오 로그인(OIDC) 시 user.email이 null인 문제를 해결합니다.
+        //       Firebase Auth 객체에서 이메일을 찾기 위한 우선순위:
+        //       1. user.email (Google 등 기본 제공업체)
+        //       2. user.providerData[0].email (Kakao 등 OIDC 제공업체)
+        const extractedEmail = user.email || (user.providerData && user.providerData[0] ? user.providerData[0].email : null);
+
         if (!doc.exists) {
             // 처음 가입한 유저: 초기 데이터 생성
             console.log("✨ 신규 유저입니다. 데이터를 초기화합니다.");
@@ -2396,7 +2402,7 @@ function loadUserData(user) {
             }
             userData = {
                 id: user.uid,
-                email: user.email,
+                email: extractedEmail, // [FIX] providerData에서 추출한 이메일 사용
                 nickname: (user.displayName || '이름없음') + providerSuffix,
                 coins: 10, // 신규 유저 보너스
                 badges: { '1': 0, '2': 0, '3': 0 },
@@ -2415,7 +2421,7 @@ function loadUserData(user) {
 
         currentUser = {
             ...userData,
-            email: userData.email || user.email,
+            email: userData.email || extractedEmail, // [FIX] DB에 이메일이 없을 경우, 추출한 이메일로 재설정
             joinedRooms: userData.joinedRooms || {},
             badges: userData.badges || { '1': 0, '2': 0, '3': 0 },
             coins: userData.coins !== undefined ? userData.coins : 10,
