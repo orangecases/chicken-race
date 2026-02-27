@@ -2352,64 +2352,60 @@ function loadUserData(user) {
         unsubscribeUserData();
     }
 
+    // [FIX] 신규/기존 유저 처리 로직을 통합하여, 신규 가입 직후 `currentUser`가 즉시 할당되지 않는 문제를 해결합니다.
+    // 이 문제는 이메일이 표시되지 않는 근본적인 원인이었습니다.
     unsubscribeUserData = userRef.onSnapshot((doc) => {
+        let userData;
+
         if (!doc.exists) {
             // 처음 가입한 유저: 초기 데이터 생성
             console.log("✨ 신규 유저입니다. 데이터를 초기화합니다.");
-            
-            // [신규] 로그인 제공업체 확인하여 닉네임에 구분자 추가 (테스트 용이성)
             let providerSuffix = "";
             if (user.providerData && user.providerData.length > 0) {
                 const providerId = user.providerData[0].providerId;
                 if (providerId === 'oidc.kakao') providerSuffix = " (Kakao)";
                 else if (providerId === 'google.com') providerSuffix = " (Google)";
             }
-
-            const initialData = {
+            userData = {
                 id: user.uid,
                 email: user.email,
-                nickname: (user.displayName || '이름없음') + providerSuffix, // [수정] 닉네임 뒤에 (Kakao) 등 표시
+                nickname: (user.displayName || '이름없음') + providerSuffix,
                 coins: 10, // 신규 유저 보너스
                 badges: { '1': 0, '2': 0, '3': 0 },
                 joinedRooms: {}
             };
-            userRef.set(initialData);
+            userRef.set(userData);
         } else {
             // 기존 유저: 서버 데이터 사용
             console.log("🔔 서버 데이터 변경 감지!");
-            const serverData = doc.data();
+            userData = doc.data();
+        }
 
-            // [수정] 관리자 권한 체크 로직 강화 (대소문자/공백 무시)
-            const userEmail = (serverData.email || user.email || '').trim().toLowerCase();
-            const isAdminUser = ADMIN_EMAILS.some(adminEmail => adminEmail.trim().toLowerCase() === userEmail);
+        // --- 공통 처리 로직 ---
+        const userEmail = (userData.email || user.email || '').trim().toLowerCase();
+        const isAdminUser = ADMIN_EMAILS.some(adminEmail => adminEmail.trim().toLowerCase() === userEmail);
 
-            // [FIX] 데이터 무결성 보장: 서버에서 필드가 누락된 경우(예: 수동 삭제) 기본값으로 초기화합니다.
-            // 이 처리를 통해 `joinedRooms`가 undefined가 되어 발생하는 'TypeError'를 방지합니다.
-            currentUser = {
-                ...serverData,
-                email: serverData.email || user.email, // [FIX] Firestore에 이메일이 없으면 Auth 정보 사용
-                joinedRooms: serverData.joinedRooms || {},
-                badges: serverData.badges || { '1': 0, '2': 0, '3': 0 },
-                coins: serverData.coins !== undefined ? serverData.coins : 10,
-                isAdmin: isAdminUser // [수정] 강화된 관리자 체크 결과 적용
-            };
-            console.log(`[Auth] User: ${userEmail}, IsAdmin: ${isAdminUser}`); // 디버깅 로그
-            isLoggedIn = true;
-            
-            // 로그인 성공 후 공통 UI 처리
-            const sceneAuth = document.getElementById('scene-auth');
-            if (sceneAuth) sceneAuth.classList.add('hidden');
-            
-            updateCoinUI();
-            // [FIX] 로그인 시에도 fetchRaceRooms()를 호출하여 데이터 로딩과 UI 렌더링 순서를 보장합니다.
-            roomFetchPromise = null; // [신규] 권한 변경 반영을 위해 목록 재로딩
-            fetchRaceRooms(false);
-            fetchMyRooms(); // [신규] 로그인 시 내 방 목록 데이터 로드
-            // 프로필 모달이 열려있다면 갱신
-            const sceneUserProfile = document.getElementById('scene-user-profile');
-            if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
-                showUserProfile();
-            }
+        currentUser = {
+            ...userData,
+            email: userData.email || user.email,
+            joinedRooms: userData.joinedRooms || {},
+            badges: userData.badges || { '1': 0, '2': 0, '3': 0 },
+            coins: userData.coins !== undefined ? userData.coins : 10,
+            isAdmin: isAdminUser
+        };
+        console.log(`[Auth] User: ${userEmail}, IsAdmin: ${isAdminUser}`);
+        isLoggedIn = true;
+
+        const sceneAuth = document.getElementById('scene-auth');
+        if (sceneAuth) sceneAuth.classList.add('hidden');
+        updateCoinUI();
+        roomFetchPromise = null;
+        fetchRaceRooms(false);
+        fetchMyRooms();
+
+        const sceneUserProfile = document.getElementById('scene-user-profile');
+        if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
+            showUserProfile();
         }
     }, (error) => {
         console.error("❌ 유저 데이터 로딩 실패:", error);
