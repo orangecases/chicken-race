@@ -2394,7 +2394,9 @@ function loadUserData(user) {
             coins: userData.coins !== undefined ? userData.coins : 10,
             isAdmin: isAdminUser
         };
-        console.log(`[Auth] User: ${userEmail}, IsAdmin: ${isAdminUser}`);
+        // [FIX] 콘솔 로그에서 정의되지 않은 `userEmail` 변수를 참조하여 발생하던 ReferenceError를 수정합니다.
+        // 이 오류로 인해 로그인 후의 모든 후속 처리가 중단되어, 이메일이 표시되지 않는 등 문제가 발생했습니다.
+        console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
         isLoggedIn = true;
 
         const sceneAuth = document.getElementById('scene-auth');
