@@ -2467,7 +2467,7 @@ function loginWithNaver() {
     const provider = new firebase.auth.OAuthProvider('oidc.naver');
     // 네이버에 요청할 데이터 범위(스코프) 설정
     provider.addScope('email');
-    provider.addScope('name'); // 네이버는 'profile' 대신 'name'으로 닉네임을 요청합니다.
+    provider.addScope('nickname'); // 네이버는 'profile' 대신 'name'으로 닉네임을 요청합니다.
     
     // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 자동으로 감지합니다.
     firebase.auth().signInWithPopup(provider).catch((error) => {
