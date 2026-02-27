@@ -2369,7 +2369,6 @@ function loadUserData(user) {
                 id: user.uid,
                 email: user.email,
                 nickname: (user.displayName || '이름없음') + providerSuffix, // [수정] 닉네임 뒤에 (Kakao) 등 표시
-                photoURL: user.photoURL || null,
                 coins: 10, // 신규 유저 보너스
                 badges: { '1': 0, '2': 0, '3': 0 },
                 joinedRooms: {}
@@ -2423,9 +2422,9 @@ function loadUserData(user) {
  */
 function loginWithKakao() {
     const provider = new firebase.auth.OAuthProvider('oidc.kakao');
-    // [FIX] 카카오 로그인 시 이메일, 프로필 정보를 명시적으로 요청합니다. (Scope 추가)
-    provider.addScope('profile');
-    provider.addScope('email');
+    // [FIX] 카카오 로그인 시 닉네임과 이메일 정보만 명시적으로 요청합니다. (프로필 사진 제외)
+    provider.addScope('profile_nickname');
+    provider.addScope('account_email');
     
     // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 자동으로 감지합니다.
     firebase.auth().signInWithPopup(provider).catch((error) => {
