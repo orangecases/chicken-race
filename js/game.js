@@ -2469,7 +2469,6 @@ function loginWithNaver() {
     provider.addScope('openid');
     // 네이버에 요청할 데이터 범위(스코프) 설정
     provider.addScope('email');
-    provider.addScope('profile'); // 네이버에서 설정한 '별명' 동의 항목
     
     // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 자동으로 감지합니다.
     firebase.auth().signInWithPopup(provider).catch((error) => {
