@@ -2466,13 +2466,14 @@ function loginWithKakao() {
 function loginWithNaver() {
     const provider = new firebase.auth.OAuthProvider('oidc.naver');
     
-    // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 자동으로 감지합니다.
+    // [중요] 딱 이 한 줄만 다시 추가합니다. 
+    // openid를 명시하면 네이버가 ID Token과 UserInfo의 'sub' 값을 동일하게 맞춰서 보내줍니다.
+    provider.addScope('openid');
+    
+    // email이나 profile은 일단 넣지 마세요. openid만 넣고 테스트하는 게 가장 깔끔합니다.
+
     firebase.auth().signInWithPopup(provider).catch((error) => {
         console.error("❌ 네이버 로그인 팝업 실패:", error.message);
-        // 사용자가 팝업을 닫는 등의 오류는 무시합니다.
-        if (error.code !== 'auth/popup-closed-by-user') {
-            alert("네이버 로그인 중 오류가 발생했습니다: " + error.message);
-        }
     });
 }
 
