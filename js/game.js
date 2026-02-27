@@ -35,8 +35,9 @@ const FIRESTORE_UPDATE_INTERVAL = 1000; // [3단계] 1초 간격으로 업데이
 let isJumpPressed = false; // [신규] 점프 버튼 누름 상태 유지 변수
 let displayedMyRecordsCount = 20; // [신규] 내 기록 표시 개수 (무한 스크롤용)
 
-// [신규] 슈퍼 관리자 이메일 목록 (이곳에 관리자 권한을 줄 이메일을 추가하세요)
-const ADMIN_EMAILS = ["orangecase018@gmail.com"]; 
+// [수정] 관리자 식별 방식을 이메일에서 UID로 변경합니다.
+// 아래 배열에 Firebase Console > Authentication에서 확인한 관리자 계정의 UID를 추가하세요.
+const ADMIN_UIDS = ["zq4jlJbH47ZEasqIxNFVVhZIqwv1"]; // 예: "Abc123xyz..."
 
 // [수정] 페이지네이션(Pagination) 설정: 1만개 이상의 방이 있어도 앱이 원활하게 동작하도록 합니다.
 let lastVisibleRoomDoc = null; // 마지막으로 불러온 방의 문서 참조
@@ -2382,8 +2383,8 @@ function loadUserData(user) {
         }
 
         // --- 공통 처리 로직 ---
-        const userEmail = (userData.email || user.email || '').trim().toLowerCase();
-        const isAdminUser = ADMIN_EMAILS.some(adminEmail => adminEmail.trim().toLowerCase() === userEmail);
+        // [수정] 관리자 식별을 이메일 대신 고유한 UID 기준으로 변경합니다.
+        const isAdminUser = ADMIN_UIDS.includes(user.uid);
 
         currentUser = {
             ...userData,
