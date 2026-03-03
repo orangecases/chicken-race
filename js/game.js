@@ -671,44 +671,35 @@ function handleGameOverUI() {
             participantDocRef.update({ status: 'waiting' }).catch(e => console.error("상태 업데이트 실패(waiting)", e));
             startAutoActionTimer(30, 'deductAttempt', '#game-over-screen .time-message'); // [수정] 1회 차감 타이머 시작
             btnRestart.style.display = 'block';
-            // [2단계] 최종 점수를 Firestore에 업데이트
-             participantDocRef.update({
-                            totalScore: myPlayer.totalScore,
-                            bestScore: myPlayer.bestScore,
-                            displayScore : finalDisplayScore
-                        }).then(() => {
-                            console.log(`✅ 최종 점수(${Math.floor(finalDisplayScore)})를 서버에 저장했습니다.`);
-                        }).catch(error => {
-                            console.error("❌ 최종 점수 서버 저장 실패:", error);
-                        });
-
             if (btnDeleteRoom) btnDeleteRoom.style.display = 'none';
         } else {
             govTitle.innerText = "GAME OVER";
             govMsg.innerText = "모든 시도 횟수를 사용했습니다.";
             
             // [신규] 멀티플레이 상태 업데이트 (탈락/종료)
-            if (myPlayer) myPlayer.status = 'dead'; // [수정] myPlayer 변수가 이미 선언되어 있으므로 재선언(const) 제거
+            if (myPlayer) myPlayer.status = 'dead';
             // [2단계] Firestore 상태 업데이트
             participantDocRef.update({ status: 'dead' }).catch(e => console.error("상태 업데이트 실패(dead)", e));
 
             awardBadgeIfEligible(); // [신규] 모든 기회 소진 시 뱃지 수여 판단
 
             btnRestart.style.display = 'none';
-             participantDocRef.update({
-                            totalScore: myPlayer.totalScore,
-                            bestScore: myPlayer.bestScore,
-                             displayScore : finalDisplayScore
-                        }).then(() => {
-                            console.log(`✅ 최종 점수(${Math.floor(finalDisplayScore)})를 서버에 저장했습니다.`);
-                        }).catch(error => {
-                            console.error("❌ 최종 점수 서버 저장 실패:", error);
-                        });
-
             if (btnDeleteRoom) btnDeleteRoom.style.display = 'block';
             // [수정] 나만 끝났다고 해서 방 전체를 종료 상태로 변경하지 않음
             // (모든 사용자가 완료해야 종료됨 - 현재는 시뮬레이션이므로 상태 유지)
         }
+
+        // [리팩토링] 최종 점수 업데이트 로직을 if/else 블록 밖으로 이동하여 중복을 제거합니다.
+        // 이 시점의 myPlayer.totalScore와 myPlayer.bestScore는 gameLoop에서 마지막 판의 점수가 이미 반영된 상태입니다.
+        participantDocRef.update({
+            totalScore: myPlayer.totalScore,
+            bestScore: myPlayer.bestScore,
+            displayScore: finalDisplayScore
+        }).then(() => {
+            console.log(`✅ 최종 점수(${Math.floor(finalDisplayScore)})를 서버에 저장했습니다.`);
+        }).catch(error => {
+            console.error("❌ 최종 점수 서버 저장 실패:", error);
+        });
     }
 
     govScreen.classList.remove('hidden');
@@ -923,17 +914,7 @@ function gameLoop() {
                         }
                         myPlayer.score = 0; // 현재 판 점수 초기화 (다음 시도를 위해)
 
-                        // [2단계] 최종 점수를 Firestore에 업데이트
-                        const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
-                        participantDocRef.update({
-                            totalScore: myPlayer.totalScore,
-                            bestScore: myPlayer.bestScore
-                        }).then(() => {
-                            console.log(`✅ 최종 점수(${Math.floor(score)})를 서버에 저장했습니다.`);
-                        }).catch(error => {
-                            console.error("❌ 최종 점수 서버 저장 실패:", error);
-                        });
-                    }
+                    } // [수정] 점수 업데이트는 handleGameOverUI에서 displayScore와 함께 처리하므로 여기서는 로컬 점수만 계산합니다.
                     // [수정] 충돌 시 시도 횟수를 즉시 1회 차감합니다.
                     // [수정] 사용자별 시도 횟수 차감
                     if (currentUser && currentUser.joinedRooms[currentRoom.id]) {
@@ -2471,6 +2452,13 @@ function loginWithNaver() {
     // 네이버 개발자 콘솔에서 '이메일'과 '별명'을 필수로 설정했기 때문에,
     // 로그인 시 동의 화면은 정상적으로 표시됩니다. 이 방식은 수동 스코프 설정으로 인한
     // 잠재적 충돌을 피하고, Firebase의 내장 네이버 연동 로직을 따르도록 합니다.
+    // [FIX] 'sub' mismatch (auth/invalid-credential) 오류 해결을 위한 새로운 시도.
+    // 비표준 스코프('nickname') 대신 OIDC 표준 스코프('profile')를 사용하여
+    // 네이버에 사용자 정보(닉네임 포함)를 요청합니다.
+    // 이는 Firebase와 네이버 간의 인증 정보 불일치 문제를 해결할 수 있습니다.
+    provider.addScope('openid');
+    provider.addScope('profile');
+    provider.addScope('email');
 
     firebase.auth().signInWithPopup(provider).catch((error) => {
         console.error("❌ 네이버 로그인 상세 에러:", error);
