@@ -2456,11 +2456,8 @@ function loginWithNaver() {
     // 비표준 스코프('nickname') 대신 OIDC 표준 스코프('profile')를 사용하여
     // 네이버에 사용자 정보(닉네임 포함)를 요청합니다.
     // 이는 Firebase와 네이버 간의 인증 정보 불일치 문제를 해결할 수 있습니다.
-    provider.addScope('openid');
-    provider.addScope('profile');
-    provider.addScope('email');
 
-    firebase.auth().signInWithPopup(provider).catch((error) => {
+    firebase.auth().signInWithPopup(provider).catch((error) => { // addScope를 제거하고 Firebase 콘솔의 기본 설정에 의존하여 잠재적인 스코프 충돌을 방지합니다.
         console.error("❌ 네이버 로그인 상세 에러:", error);
         if (error.code !== 'auth/popup-closed-by-user') {
             alert("네이버 로그인 중 오류가 발생했습니다: " + error.message);
