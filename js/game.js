@@ -2466,7 +2466,10 @@ function loginWithNaver() {
 
     // 3. 네이버 로그인 팝업 띄우기
     const url = `https://nid.naver.com/oauth2.0/authorize?response_type=token&client_id=${clientId}&redirect_uri=${redirectUri}&state=${state}`;
-
+    
+    // 혹시 몰라 콘솔에 찍어보는 디버깅 코드
+    console.log("🚀 최종 전송 URL:", url);
+    
     window.open(url, 'naverlogin', 'width=450,height=600');
 
     // 4. 부모 창(게임 화면)에서 팝업이 보내는 토큰 기다리기
