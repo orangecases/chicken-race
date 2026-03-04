@@ -12,6 +12,8 @@ if (window.location.hash.includes('access_token')) {
         window.opener.postMessage({ type: 'NAVER_LOGIN', token: token }, '*');
         window.close(); // 팝업 닫기
     }
+    // 🚨 [추가됨] 팝업창에서는 더 이상 아래쪽의 게임 로직을 실행하지 않도록 강제로 멈춥니다!
+    throw new Error("팝업창 처리를 완료하고 스크립트를 중지합니다. (정상적인 동작입니다)");
 }
 
 // [1. 전역 변수 및 게임 설정]
