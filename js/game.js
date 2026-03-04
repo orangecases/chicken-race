@@ -2449,8 +2449,8 @@ function loginWithNaver() {
 
     // 1. OIDC 표준 스코프를 명시적으로 요청합니다.
     // 네이버 인증 서버가 식별자(sub)와 이메일, 프로필을 정상적인 ID 토큰에 담아 주도록 유도합니다.
-    provider.addScope('profile');
-    provider.addScope('email');
+    // provider.addScope('profile');
+    // provider.addScope('email');
 
     // 2. (선택사항) 토큰 갱신 및 정보 불일치를 막기 위해 강제로 동의 화면을 띄울 수 있습니다.
     provider.setCustomParameters({
