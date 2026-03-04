@@ -2456,6 +2456,32 @@ function loginWithKakao() {
 }
 
 /**
+ * [신규] 페이스북 로그인 함수
+ */
+function loginWithFacebook() {
+    const provider = new firebase.auth.FacebookAuthProvider();
+    
+    // 이메일과 공개 프로필 권한을 요청합니다.
+    provider.addScope('email');
+    provider.addScope('public_profile');
+
+    // 팝업창으로 로그인을 진행합니다.
+    firebase.auth().signInWithPopup(provider)
+        .then((result) => {
+            console.log("✅ 페이스북 로그인 성공!");
+            // 로그인 후 유저 처리는 기존 onAuthStateChanged 리스너가 수행합니다.
+        })
+        .catch((error) => {
+            console.error("❌ 페이스북 로그인 실패:", error.code, error.message);
+            if (error.code === 'auth/account-exists-with-different-credential') {
+                alert("이미 동일한 이메일로 가입된 다른 계정(구글/네이버 등)이 있습니다.");
+            } else {
+                alert("페이스북 로그인 중 오류가 발생했습니다: " + error.message);
+            }
+        });
+}
+
+/**
  * [수정됨] 네이버 팝업 로그인 & 커스텀 토큰 인증 로직
  */
 function loginWithNaver() {
@@ -2855,11 +2881,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 loginWithGoogle();
             } else if (btn.classList.contains('kakao')) {
                 loginWithKakao();
+            } else if (btn.classList.contains('facebook')) {
+                loginWithFacebook();
             } else if (btn.classList.contains('naver')) {
                 loginWithNaver();
             } else {
-                // TODO: Facebook, YouTube 로그인 구현
-                alert('해당 로그인 방식은 현재 지원되지 않습니다.'); // [수정] 네이버 제외
+                // TODO: YouTube 로그인 구현
+                alert('해당 로그인 방식은 현재 지원되지 않습니다.');
             }
         };
     });
