@@ -2458,14 +2458,15 @@ function loginWithKakao() {
  */
 function loginWithNaver() {
     // 1. 네이버 클라이언트 ID 
-    const clientId = "YNGZCcwBzPp11G9wKmHS"; 
+    const clientId = "YNgZCcwBzPp11G9wKmHS";
     
     // 2. 현재 게임이 실행 중인 주소 (이 주소로 팝업이 다시 돌아옵니다)
-    const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
+    const redirectUri = encodeURIComponent("https://orangecases.github.io/chicken-race/");
     const state = Math.random().toString(36).substr(2, 11);
 
     // 3. 네이버 로그인 팝업 띄우기
     const url = `https://nid.naver.com/oauth2.0/authorize?response_type=token&client_id=${clientId}&redirect_uri=${redirectUri}&state=${state}`;
+
     window.open(url, 'naverlogin', 'width=450,height=600');
 
     // 4. 부모 창(게임 화면)에서 팝업이 보내는 토큰 기다리기
