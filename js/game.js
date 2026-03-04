@@ -2442,23 +2442,30 @@ function loginWithKakao() {
 }
 
 /**
- * [신규] 네이버 OIDC 로그인 함수
+ * [수정됨] 네이버 OIDC 로그인 함수
  */
 function loginWithNaver() {
     const provider = new firebase.auth.OAuthProvider('oidc.naver');
 
-    // [FIX] 'sub' mismatch (auth/invalid-credential) 오류에 대한 새로운 시도.
-    // 모든 addScope() 호출을 제거하고, Firebase와 네이버의 기본 OIDC 연동 설정에 의존합니다.
-    // 네이버 개발자 콘솔에서 '이메일'과 '별명'을 필수로 설정했기 때문에,
-    // 로그인 시 동의 화면은 정상적으로 표시됩니다. 이 방식은 수동 스코프 설정으로 인한
-    // 잠재적 충돌을 피하고, Firebase의 내장 네이버 연동 로직을 따르도록 합니다.
-    // [FIX] 'sub' mismatch (auth/invalid-credential) 오류 해결을 위한 새로운 시도.
-    // 비표준 스코프('nickname') 대신 OIDC 표준 스코프('profile')를 사용하여
-    // 네이버에 사용자 정보(닉네임 포함)를 요청합니다.
-    // 이는 Firebase와 네이버 간의 인증 정보 불일치 문제를 해결할 수 있습니다.
+    // 1. OIDC 표준 스코프를 명시적으로 요청합니다.
+    // 네이버 인증 서버가 식별자(sub)와 이메일, 프로필을 정상적인 ID 토큰에 담아 주도록 유도합니다.
+    provider.addScope('profile');
+    provider.addScope('email');
 
-    firebase.auth().signInWithPopup(provider).catch((error) => { // addScope를 제거하고 Firebase 콘솔의 기본 설정에 의존하여 잠재적인 스코프 충돌을 방지합니다.
+    // 2. (선택사항) 토큰 갱신 및 정보 불일치를 막기 위해 강제로 동의 화면을 띄울 수 있습니다.
+    provider.setCustomParameters({
+        prompt: 'consent'
+    });
+
+    // 3. 팝업으로 로그인 시도
+    firebase.auth().signInWithPopup(provider).then((result) => {
+        console.log("✅ 네이버 로그인 성공!");
+        // 로그인이 성공하면 기존에 작성해두신 onAuthStateChanged 리스너가 
+        // 자동으로 loadUserData를 호출하여 처리할 것입니다.
+    }).catch((error) => {
         console.error("❌ 네이버 로그인 상세 에러:", error);
+        
+        // 사용자가 팝업을 강제로 닫은 경우는 에러 메시지를 띄우지 않습니다.
         if (error.code !== 'auth/popup-closed-by-user') {
             alert("네이버 로그인 중 오류가 발생했습니다: " + error.message);
         }
