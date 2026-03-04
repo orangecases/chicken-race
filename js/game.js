@@ -2,6 +2,18 @@
  * 📢 치킨 런 - 최종 통합 및 UI 연출/싱글모드 로직 수정 버전
  */
 
+// [네이버 로그인 팝업용 토큰 전달 로직]
+if (window.location.hash.includes('access_token')) {
+    const params = new URLSearchParams(window.location.hash.substring(1));
+    const token = params.get('access_token');
+    
+    // 이 창이 팝업창인지 확인하고 부모 창으로 토큰 전달
+    if (window.opener) {
+        window.opener.postMessage({ type: 'NAVER_LOGIN', token: token }, '*');
+        window.close(); // 팝업 닫기
+    }
+}
+
 // [1. 전역 변수 및 게임 설정]
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -2442,34 +2454,44 @@ function loginWithKakao() {
 }
 
 /**
- * [수정됨] 네이버 OIDC 로그인 함수
+ * [수정됨] 네이버 팝업 로그인 & 커스텀 토큰 인증 로직
  */
 function loginWithNaver() {
-    const provider = new firebase.auth.OAuthProvider('oidc.naver');
+    // 1. 네이버 클라이언트 ID 
+    const clientId = "YNGZCcwBzPp11G9wKmHS"; 
+    
+    // 2. 현재 게임이 실행 중인 주소 (이 주소로 팝업이 다시 돌아옵니다)
+    const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
+    const state = Math.random().toString(36).substr(2, 11);
 
-    // 1. OIDC 표준 스코프를 명시적으로 요청합니다.
-    // 네이버 인증 서버가 식별자(sub)와 이메일, 프로필을 정상적인 ID 토큰에 담아 주도록 유도합니다.
-    // provider.addScope('profile');
-    // provider.addScope('email');
+    // 3. 네이버 로그인 팝업 띄우기
+    const url = `https://nid.naver.com/oauth2.0/authorize?response_type=token&client_id=${clientId}&redirect_uri=${redirectUri}&state=${state}`;
+    window.open(url, 'naverlogin', 'width=450,height=600');
 
-    // 2. (선택사항) 토큰 갱신 및 정보 불일치를 막기 위해 강제로 동의 화면을 띄울 수 있습니다.
-    provider.setCustomParameters({
-        prompt: 'consent'
-    });
+    // 4. 부모 창(게임 화면)에서 팝업이 보내는 토큰 기다리기
+    window.addEventListener('message', async (event) => {
+        if (event.data.type === 'NAVER_LOGIN' && event.data.token) {
+            const accessToken = event.data.token;
+            console.log("🔑 네이버 Access Token 획득! 백엔드로 검증을 요청합니다...");
 
-    // 3. 팝업으로 로그인 시도
-    firebase.auth().signInWithPopup(provider).then((result) => {
-        console.log("✅ 네이버 로그인 성공!");
-        // 로그인이 성공하면 기존에 작성해두신 onAuthStateChanged 리스너가 
-        // 자동으로 loadUserData를 호출하여 처리할 것입니다.
-    }).catch((error) => {
-        console.error("❌ 네이버 로그인 상세 에러:", error);
-        
-        // 사용자가 팝업을 강제로 닫은 경우는 에러 메시지를 띄우지 않습니다.
-        if (error.code !== 'auth/popup-closed-by-user') {
-            alert("네이버 로그인 중 오류가 발생했습니다: " + error.message);
+            try {
+                // 방금 배포한 클라우드 함수 호출!
+                const loginFunction = firebase.functions().httpsCallable('naverLogin');
+                const result = await loginFunction({ accessToken: accessToken });
+                
+                // 백엔드가 안전하게 만들어준 커스텀 토큰 받기
+                const customToken = result.data.customToken;
+
+                // Firebase에 최종 로그인 처리!
+                await firebase.auth().signInWithCustomToken(customToken);
+                console.log("✅ 네이버 로그인(커스텀 토큰) 완벽 성공!");
+                
+            } catch (error) {
+                console.error("❌ 백엔드 인증 처리 중 오류:", error);
+                alert("네이버 로그인 처리 중 오류가 발생했습니다.");
+            }
         }
-    });
+    }, { once: true }); // 한 번만 실행되도록 설정
 }
 
 /**
