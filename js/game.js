@@ -2469,14 +2469,17 @@ function loginWithNaver() {
     
     // 혹시 몰라 콘솔에 찍어보는 디버깅 코드
     console.log("🚀 최종 전송 URL:", url);
-    
+
     window.open(url, 'naverlogin', 'width=450,height=600');
 
     // 4. 부모 창(게임 화면)에서 팝업이 보내는 토큰 기다리기
     window.addEventListener('message', async (event) => {
         if (event.data.type === 'NAVER_LOGIN' && event.data.token) {
             const accessToken = event.data.token;
+
             console.log("🔑 네이버 Access Token 획득! 백엔드로 검증을 요청합니다...");
+            // 👇 이 줄을 추가해서 진짜 토큰 글자가 잘 있는지 확인해 봅니다!
+            console.log("🔑 프론트엔드가 낚아챈 토큰:", accessToken);
 
             try {
                 // 방금 배포한 클라우드 함수 호출!
