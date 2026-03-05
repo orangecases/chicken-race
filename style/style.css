@@ -1084,30 +1084,19 @@ html, body small{font-size: 70%;}
     background-position: center;
 }
 
-/* [수정] Google을 YouTube로 변경하고 아이콘 추가 */
 .sns-btn.google { background-color: #FFFFFF; color: #191919; }
 .sns-btn.google::before { background-image: url(../assets/images/sns-google.png); }
 
-.sns-btn.youtube { background-color: #FF0000; color: #fff; }
-.sns-btn.youtube::before { background-image: url(../assets/images/sns-youtube.png); }
+.sns-btn.ios { background-color: #000000; color: #fff; }
+.sns-btn.ios::before { background-image: url(../assets/images/sns-ios.png); }
 
-.sns-btn.kakao {
-    background-color: #f6dc32;
-    color: #191919;
-}
+.sns-btn.kakao { background-color: #f6dc32; color: #191919;}
 .sns-btn.kakao::before { background-image: url(../assets/images/sns-kakao.png); }
 
-/* [수정] 페이스북, 네이버 로그인 버튼에 아이콘 추가 */
-.sns-btn.facebook {
-    background-color: #1877F2;
-    color: #fff;
-}
+.sns-btn.facebook { background-color: #1877F2; color: #fff; }
 .sns-btn.facebook::before { background-image: url(../assets/images/sns-facebook.png); }
 
-.sns-btn.naver {
-    background-color: #35b01e;
-    color: #fff;
-}
+.sns-btn.naver { background-color: #35b01e; color: #fff; }
 .sns-btn.naver::before { background-image: url(../assets/images/sns-naver.png); }
 
 /* [신규] 사용자 정보 모달 */
