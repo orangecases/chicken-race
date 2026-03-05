@@ -2877,16 +2877,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // [신규] SNS 로그인 버튼 시뮬레이션
     document.querySelectorAll('.sns-btn').forEach(btn => {
         btn.onclick = () => {
-            if (btn.classList.contains('kakao')) {
+            if (btn.classList.contains('google')) {
+                loginWithGoogle();
+            } else if (btn.classList.contains('kakao')) {
                 loginWithKakao();
-            } else if (btn.classList.contains('naver')) {
-                loginWithNaver();
             } else if (btn.classList.contains('facebook')) {
                 loginWithFacebook();
-            } else if (btn.classList.contains('google')) {
-                loginWithGoogle();
-            } else if (btn.classList.contains('ios')) {
-                // TODO: iOS 로그인 구현
+            } else if (btn.classList.contains('naver')) {
+                loginWithNaver();
+            } else {
+                // TODO: IOS 로그인 구현
                 alert('해당 로그인 방식은 현재 지원되지 않습니다.');
             }
         };
