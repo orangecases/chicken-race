@@ -661,7 +661,8 @@ function handleGameOverUI() {
 
         const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
 
-        myPlayer.attemptsLeft = currentRoom.attempts - userUsedAttempts;
+        // [FIX] myPlayer.attemptsLeft는 onSnapshot에 의해 덮어쓰여질 수 있으므로, 지역 변수로 남은 횟수를 명확하게 계산하고 사용합니다.
+        const attemptsLeft = currentRoom.attempts - userUsedAttempts;
         
         // [FIX] 충돌 직후 점수가 NaN이 되는 문제 해결
         // 충돌 시 score가 NaN이 되는 경우를 방지하기 위해 유효성 검사 추가
@@ -677,9 +678,9 @@ function handleGameOverUI() {
             finalDisplayScore = (myPlayer.bestScore || 0);
         }
 
-        if (myPlayer.attemptsLeft > 0) { // 남은 시도 횟수가 있을 경우
+        if (attemptsLeft > 0) { // 남은 시도 횟수가 있을 경우
             govTitle.innerText = "WOOPS!";
-            govMsg.innerText = `남은 횟수 : ${myPlayer.attemptsLeft}/${currentRoom.attempts}`;
+            govMsg.innerText = `남은 횟수 : ${attemptsLeft}/${currentRoom.attempts}`;
             myPlayer.status = 'waiting'; // 대기 상태로 변경
             // [2단계] Firestore 상태 업데이트
             participantDocRef.update({ status: 'waiting' }).catch(e => console.error("상태 업데이트 실패(waiting)", e));
