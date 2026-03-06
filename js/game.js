@@ -1343,28 +1343,21 @@ function togglePause() {
 }
 
 /**
- * [신규] 게임을 종료하고 로비(인트로) 화면으로 돌아갑니다.
+ * [신규] 서버에서 사용자를 방에서 퇴장시키는 백엔드 로직.
+ * 데이터 정합성을 보장하기 위해 모든 퇴장 시나리오(정상, 비정상)에서 호출됩니다.
+ * @param {string} roomId - 퇴장할 방의 ID
+ * @param {boolean} isFullExit - true일 경우 참가자 목록에서 완전히 제거(환불/인원감소), false일 경우 게임 포기로 간주하고 'dead' 처리.
  */
-async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부를 인자로 받음
-    // [FIX] 로비로 나갈 때 세션 스토리지의 활성 방 ID 제거
-    sessionStorage.removeItem('activeRoomId');
+async function performServerExit(roomId, isFullExit) {
+    if (!currentUser || !roomId) return;
 
-    if (unsubscribeParticipantsListener) {
-        unsubscribeParticipantsListener();
-        unsubscribeParticipantsListener = null;
-        console.log("🎧 Participants listener detached.");
-    }
+    const myId = currentUser.id;
+    const roomRef = db.collection('rooms').doc(roomId);
 
-    stopBGM();
-    if (gameLoopId) { cancelAnimationFrame(gameLoopId); gameLoopId = null; }
-
-    // [FIX] "완전 퇴장"일 경우에만 서버 데이터를 정리합니다.
-    if (isFullExit && currentGameMode === 'multi' && currentRoom && currentUser) {
-        console.log(`🚀 방 [${currentRoom.id}]에서 완전 퇴장을 시작합니다.`);
-        const roomRef = db.collection('rooms').doc(currentRoom.id);
-        const myId = currentUser.id;
-        try {
-            // [FIX] 트랜잭션 내에서 쿼리를 실행할 수 없으므로, 참가자 목록을 미리 읽어옵니다.
+    try {
+        if (isFullExit) {
+            console.log(`🚀 Server Exit: Performing FULL exit from room [${roomId}].`);
+            
             const participantsSnapshot = await roomRef.collection('participants').get();
             const myParticipantDoc = participantsSnapshot.docs.find(doc => doc.id === myId);
 
@@ -1374,18 +1367,13 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
                     if (!roomDoc.exists) return;
 
                     const roomData = roomDoc.data();
-                    const myParticipantRef = myParticipantDoc.ref;
-                    
-                    // 1. 참가자 목록에서 내 문서 삭제
-                    transaction.delete(myParticipantRef);
+                    transaction.delete(myParticipantDoc.ref);
 
-                    // 2. 방 인원수 감소 또는 방 삭제
                     const newPlayerCount = roomData.currentPlayers - 1;
                     if (newPlayerCount <= 0) {
                         transaction.delete(roomRef);
                     } else {
                         const updates = { currentPlayers: firebase.firestore.FieldValue.increment(-1) };
-                        // 내가 방장이었다면 방장 위임
                         if (roomData.creatorUid === myId) {
                             const otherPlayers = participantsSnapshot.docs.map(d => d.data()).filter(p => p.id !== myId);
                             if (otherPlayers.length > 0) {
@@ -1397,46 +1385,55 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
                 });
             }
 
-            // 3. 내 유저 정보의 '참가중인 방' 목록에서 제거
-            if (currentUser.joinedRooms[currentRoom.id]) {
-                const roomId = currentRoom.id;
+            if (currentUser.joinedRooms[roomId]) {
                 delete currentUser.joinedRooms[roomId];
                 await db.collection("users").doc(myId).update({
                     [`joinedRooms.${roomId}`]: firebase.firestore.FieldValue.delete()
                 });
             }
-        } catch (error) {
-            console.error("❌ 완전 퇴장 처리 중 오류 발생:", error);
-        }
-    } else if (currentGameMode === 'multi' && currentRoom && currentUser) { // [FIX] 소프트 퇴장 로직 블록이 실행되지 않던 버그 수정
-        // isFullExit이 false일 때 이 블록이 실행됩니다 (소프트 퇴장).
-        const myId = currentUser.id;
-        const myPlayer = multiGamePlayers.find(p => p.id === myId);
-        const userRoomState = currentUser.joinedRooms[currentRoom.id];
+        } else { // Soft Exit (Forfeit)
+            console.log(`🚀 Server Exit: Performing SOFT exit (forfeit) from room [${roomId}].`);
+            
+            const roomDoc = await roomRef.get();
+            if (!roomDoc.exists) return;
+            const roomData = roomDoc.data();
 
-        // [수정] 게임 플레이/일시정지/대기(재시도화면) 중에 나가는 경우, '게임 포기'로 간주합니다.
-        // 기존에는 playing/paused 상태만 체크했으나, waiting(재시도 대기) 상태에서도 나갈 수 있으므로 조건을 변경합니다.
-        // userRoomState.isPaid가 true이고 아직 기회가 남았다면 포기 처리합니다.
-        const isGameInProgress = userRoomState && userRoomState.isPaid && userRoomState.usedAttempts < currentRoom.attempts;
-
-        if (isGameInProgress) {
-            console.log("소프트 퇴장: 게임 포기로 간주하고 상태를 'dead'로 변경합니다.");
-            // 1. 모든 시도 횟수를 소진한 것으로 처리
-            if (userRoomState) {
-                userRoomState.usedAttempts = currentRoom.attempts;
-                await saveUserDataToFirestore(); // usedAttempts를 서버에 저장
+            if (currentUser.joinedRooms[roomId]) {
+                await db.collection("users").doc(myId).update({
+                    [`joinedRooms.${roomId}.usedAttempts`]: roomData.attempts
+                });
             }
 
-            // 2. Firestore에서 내 참가자 상태를 'dead'로 업데이트
-            const newStatus = 'dead';
-            const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
-            await participantDocRef.update({ status: newStatus });
+            const participantRef = roomRef.collection('participants').doc(myId);
+            await participantRef.update({ status: 'dead' });
 
-            // 3. 모든 기회를 소진했으므로 뱃지 획득 여부 확인
+            // 포기 시에도 뱃지 획득 여부 확인
             awardBadgeIfEligible();
-        } else {
-            console.log("소프트 퇴장: 게임 진행 중이 아니므로 상태를 변경하지 않습니다.");
         }
+    } catch (error) {
+        console.error(`❌ Server exit from room [${roomId}] failed:`, error);
+    }
+}
+
+/**
+ * [신규] 게임을 종료하고 로비(인트로) 화면으로 돌아갑니다.
+ */
+async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부를 인자로 받음
+    // [수정] 비정상 종료 복구를 위해 세션 스토리지의 활성 방 ID를 제거합니다.
+    sessionStorage.removeItem('activeRoomId');
+
+    if (unsubscribeParticipantsListener) {
+        unsubscribeParticipantsListener();
+        unsubscribeParticipantsListener = null;
+        console.log("🎧 Participants listener detached.");
+    }
+
+    stopBGM();
+    if (gameLoopId) { cancelAnimationFrame(gameLoopId); gameLoopId = null; }
+
+    // [리팩토링] 서버의 데이터 정합성을 맞추는 로직을 performServerExit 함수로 분리/통합했습니다.
+    if (currentGameMode === 'multi' && currentRoom && currentUser) {
+        await performServerExit(currentRoom.id, isFullExit);
     }
 
     // --- 공통 UI 정리 및 화면 전환 ---
@@ -1903,6 +1900,14 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
 
     currentGameMode = mode;
     currentRoom = roomData; 
+
+    // [신규] 비정상 종료 복구를 위해 현재 게임 상태를 세션 스토리지에 기록합니다.
+    if (mode === 'multi' && roomData) {
+        sessionStorage.setItem('activeRoomId', roomData.id);
+    } else if (mode === 'single') {
+        // 싱글 모드도 일관성을 위해 기록합니다.
+        sessionStorage.setItem('activeRoomId', 'single_player_mode');
+    }
 
     // [신규] 진입 시 버튼 비용 UI 업데이트 (싱글 1코인, 멀티 설정된 회차만큼)
     updateButtonCosts();
@@ -2378,7 +2383,7 @@ function loadUserData(user) {
     // [FIX] 신규/기존 유저 처리 로직을 통합하여, 신규 가입 직후 `currentUser`가 즉시 할당되지 않는 문제를 해결합니다.
     // 이 문제는 이메일이 표시되지 않는 근본적인 원인이었습니다.
     unsubscribeUserData = userRef.onSnapshot((doc) => {
-        let userData;
+        let userData, isNewUser = false;
 
         // [FIX] 네이버/카카오 등 다양한 로그인 제공업체의 정보를 올바르게 추출합니다.
         //       로그인 시 사용된 제공업체의 정보(providerData[0])를 우선적으로 사용합니다.
@@ -2389,6 +2394,7 @@ function loadUserData(user) {
         if (!doc.exists) {
             // 처음 가입한 유저: 초기 데이터 생성
             console.log("✨ 신규 유저입니다. 데이터를 초기화합니다.");
+            isNewUser = true;
             let providerSuffix = "";
             if (providerInfo) {
                 const providerId = providerInfo.providerId;
@@ -2434,6 +2440,24 @@ function loadUserData(user) {
         // 데이터베이스의 이메일 정보가 잘못된 경우, 올바른 정보로 업데이트합니다.
         if (needsDbUpdate) {
             userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
+        }
+
+        // [신규] 비정상 종료(새로고침 등) 복구 로직
+        // 신규 유저가 아닌 경우에만 실행하여, 가입 직후 불필요한 처리를 방지합니다.
+        if (!isNewUser) {
+            const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
+            if (lastActiveRoomId) {
+                sessionStorage.removeItem('activeRoomId'); // 즉시 제거하여 무한 루프 방지
+                
+                if (lastActiveRoomId === 'single_player_mode') {
+                    console.log('⚠️ 비정상 종료 감지: 싱글 플레이 게임을 종료 처리했습니다.');
+                } else {
+                    console.log(`⚠️ 비정상 종료 감지: 방 [${lastActiveRoomId}]에서 퇴장 처리를 시작합니다.`);
+                    const userRoomState = currentUser.joinedRooms ? currentUser.joinedRooms[lastActiveRoomId] : null;
+                    const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
+                    performServerExit(lastActiveRoomId, !hasStartedPlaying);
+                }
+            }
         }
 
         console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
