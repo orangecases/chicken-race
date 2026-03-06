@@ -1409,8 +1409,12 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
         const myPlayer = multiGamePlayers.find(p => p.id === myId);
         const userRoomState = currentUser.joinedRooms[currentRoom.id];
 
-        // 게임 플레이/일시정지 중에 나가는 경우, '게임 포기'로 간주합니다.
-        if (myPlayer && (myPlayer.status === 'playing' || myPlayer.status === 'paused')) {
+        // [수정] 게임 플레이/일시정지/대기(재시도화면) 중에 나가는 경우, '게임 포기'로 간주합니다.
+        // 기존에는 playing/paused 상태만 체크했으나, waiting(재시도 대기) 상태에서도 나갈 수 있으므로 조건을 변경합니다.
+        // userRoomState.isPaid가 true이고 아직 기회가 남았다면 포기 처리합니다.
+        const isGameInProgress = userRoomState && userRoomState.isPaid && userRoomState.usedAttempts < currentRoom.attempts;
+
+        if (isGameInProgress) {
             console.log("소프트 퇴장: 게임 포기로 간주하고 상태를 'dead'로 변경합니다.");
             // 1. 모든 시도 횟수를 소진한 것으로 처리
             if (userRoomState) {
