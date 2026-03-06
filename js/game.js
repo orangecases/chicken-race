@@ -2147,15 +2147,21 @@ async function removeFromMyRooms() {
     const myId = currentUser.id;
 
     try {
-        // [FIX] '참가중인 목록에서 삭제'는 참가 기록(점수)은 유지하되, 목록에서만 숨기는 기능입니다.
-        // 따라서 참가자 정보를 삭제하는 '완전 퇴장' 대신, 유저 정보에 'hidden' 플래그를 설정합니다.
+        // [수정] '목록에서 삭제'는 2단계로 동작합니다.
+        // 1. 유저의 개인 joinedRooms 목록에 hidden 플래그를 설정하여 '참가중' 탭에서 보이지 않게 합니다.
+        // 2. 중앙 데이터인 participants 서브컬렉션에도 hidden 플래그를 설정하여, 모든 유저가 나갔을 때 방을 최종 삭제할 수 있도록 합니다.
         if (currentUser.joinedRooms[roomId]) {
             currentUser.joinedRooms[roomId].hidden = true; // 로컬 상태 업데이트
             await db.collection("users").doc(myId).update({
                 [`joinedRooms.${roomId}.hidden`]: true // Firestore에 'hidden' 플래그만 업데이트
             });
-            console.log(`✅ 방 [${roomId}]을(를) '참가중인 목록'에서 숨겼습니다.`);
         }
+
+        // 중앙 참가자 목록에도 숨김 처리
+        const participantRef = db.collection('rooms').doc(roomId).collection('participants').doc(myId);
+        await participantRef.update({ hidden: true });
+
+        console.log(`✅ 방 [${roomId}]을(를) '참가중인 목록'에서 숨겼습니다.`);
 
         // UI 정리를 위해 로비로 이동합니다. (소프트 퇴장)
         await exitToLobby(false);
@@ -2706,7 +2712,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (newPlayerCount <= 0) {
                         transaction.delete(roomRef);
                     } else {
-                        transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(-1) });
+                        // [수정] 봇을 삭제(하드 삭제)할 때, 방이 'finished' 상태였다면 다시 'inprogress'로 되돌립니다.
+                        const updates = { currentPlayers: firebase.firestore.FieldValue.increment(-1) };
+                        if (roomData.status === 'finished') {
+                            updates.status = 'inprogress';
+                        }
+                        transaction.update(roomRef, updates);
                     }
                 });
             }
@@ -2763,22 +2774,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     await participantRef.update({ status: 'dead' });
                     break;
                 case 'force-delete':
-                    console.log(`[Debug] Bot [${botId}] 강제 삭제`);
-                    const roomRef = db.collection('rooms').doc(currentRoom.id);
+                    // [수정] '목록삭제'는 봇을 DB에서 삭제하는 것이 아니라, 일반 유저처럼 '목록에서 숨김' 처리하는 기능입니다.
+                    console.log(`[Debug] Bot [${botId}] '목록에서 삭제' 시뮬레이션`);
+                    const roomRefForDelete = db.collection('rooms').doc(currentRoom.id);
+                    const participantsRefForDelete = roomRefForDelete.collection('participants');
+
                     await db.runTransaction(async (transaction) => {
-                        const roomDoc = await transaction.get(roomRef);
-                        if (!roomDoc.exists) return;
+                        // 1. 해당 방의 모든 참가자 정보를 가져옵니다.
+                        const participantsSnapshot = await transaction.get(participantsRefForDelete);
+                        const botDoc = participantsSnapshot.docs.find(doc => doc.id === botId);
+                        if (!botDoc) return;
 
-                        const roomData = roomDoc.data();
-                        const updates = { currentPlayers: firebase.firestore.FieldValue.increment(-1) };
+                        // 2. 대상 봇의 상태를 'hidden: true'로 업데이트합니다.
+                        transaction.update(botDoc.ref, { hidden: true });
 
-                        // 만약 방이 'finished' 상태였다면, 참가자가 삭제되므로 'inprogress'로 되돌립니다.
-                        if (roomData.status === 'finished') {
-                            updates.status = 'inprogress';
+                        // 3. 이 봇을 제외한 다른 모든 참가자들도 hidden 상태인지 확인합니다.
+                        let allParticipantsHidden = true;
+                        participantsSnapshot.forEach(doc => {
+                            // 현재 업데이트하려는 봇이 아니고, hidden 플래그가 없는 참가자가 있다면, 아직 모두 나간 것이 아닙니다.
+                            if (doc.id !== botId && !doc.data().hidden) {
+                                allParticipantsHidden = false;
+                            }
+                        });
+
+                        // 4. 만약 모든 참가자가 hidden 상태가 되면, 방 자체를 삭제합니다.
+                        if (allParticipantsHidden) {
+                            console.log(`모든 참가자가 목록에서 방을 제거했습니다. 방 [${currentRoom.id}]을(를) 삭제합니다.`);
+                            transaction.delete(roomRefForDelete);
                         }
-                        
-                        transaction.delete(participantRef);
-                        transaction.update(roomRef, updates);
                     });
                     break;
             }
