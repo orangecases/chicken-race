@@ -57,7 +57,7 @@ const ADMIN_UIDS = ["zq4jlJbH47ZEasqIxNFVVhZIqwv1"]; // 예: "Abc123xyz..."
 let lastVisibleRoomDoc = null; // 마지막으로 불러온 방의 문서 참조
 let isFetchingRooms = false;   // 방 목록을 불러오는 중인지 여부 (중복 호출 방지)
 let currentRoomLimit = 5;     // [신규] 현재 불러올 방의 개수 (limit)
-let currentMyRoomLimit = 5;   // [신규] 참가중 탭의 목록 노출 개수 (limit)
+let currentMyRoomLimit = 10;   // [신규] 참가중 탭의 목록 노출 개수 (limit)
 let unsubscribeRoomListener = null; // [신규] 실시간 리스너 해제 함수
 const ROOMS_PER_PAGE = 5;     // 한 번에 불러올 방의 개수
 let allRoomsLoaded = false;    // 모든 방을 다 불러왔는지 여부 (더보기 버튼 표시 제어)
@@ -1184,7 +1184,7 @@ function fetchRaceRooms(loadMore = false) {
                     raceRooms = newRooms;
 
                     // 더 이상 불러올 방이 없는지 확인
-                    if (querySnapshot.docs.length < currentRoomLimit) {
+                    if (querySnapshot.docs.length <= currentRoomLimit) {
                         allRoomsLoaded = true;
                         if (loader) loader.classList.add('hidden');
                     } else {
