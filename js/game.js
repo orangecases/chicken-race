@@ -834,7 +834,12 @@ function handleMultiplayerTick() {
     }
     
     // 4. 모든 플레이어의 게임 종료 여부 확인
-    if (multiGamePlayers.length > 0 && multiGamePlayers.every(p => p.status === 'dead') && currentRoom.status !== 'finished') {
+    // [수정] 방이 꽉 찼고(currentPlayers === maxPlayers), 모든 참가자가 게임을 완료했을 때만 'finished' 상태로 변경합니다.
+    // 이전 로직은 방이 꽉 차지 않아도 현재 참가자 전원이 완료하면 'finished'로 변경하는 문제가 있었습니다.
+    const isRoomFull = currentRoom && multiGamePlayers.length >= currentRoom.limit;
+    const areAllPlayersDead = multiGamePlayers.length > 0 && multiGamePlayers.every(p => p.status === 'dead');
+
+    if (isRoomFull && areAllPlayersDead && currentRoom.status !== 'finished') {
         currentRoom.status = 'finished';
         db.collection('rooms').doc(currentRoom.id).update({ status: 'finished' })
             .then(() => console.log(`✅ 방 [${currentRoom.id}] 상태를 'finished'로 최종 변경했습니다.`));
@@ -1514,8 +1519,12 @@ async function attemptToJoinRoom(room) {
             const serverRoomData = roomDoc.data();
             if (serverRoomData.currentPlayers >= serverRoomData.maxPlayers) { throw "방이 가득 찼습니다."; }
 
-            // 1. 인원 수를 1 증가시킵니다.
-            transaction.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
+            // 1. 인원 수를 1 증가시키고, 필요 시 상태를 'inprogress'로 변경합니다.
+            const updates = { currentPlayers: firebase.firestore.FieldValue.increment(1) };
+            if (serverRoomData.status === 'finished') {
+                updates.status = 'inprogress';
+            }
+            transaction.update(roomRef, updates);
 
             // 2. 참가자(participants) 하위 컬렉션에 내 정보를 추가합니다.
             const myParticipantRef = roomRef.collection('participants').doc(currentUser.id);
@@ -1702,7 +1711,8 @@ function renderRoomLists(refreshSnapshot = false) {
         // [수정] 서버 쿼리에서 where를 뺐으므로 여기서 status 필터링 수행
         // [FIX] 필터링 후 설정된 개수(currentRoomLimit)만큼만 잘라서 보여줍니다.
         // [요청반영] 모집 마감된(꽉 찬) 방은 목록에서 제외합니다.
-        raceRoomSnapshot = raceRooms.filter(r => r.status !== 'finished' && r.current > 0 && r.current < r.limit)
+        // [수정] 'finished' 상태의 방도 정원이 차지 않았다면 목록에 표시하여 재입장/부활이 가능하도록 r.status !== 'finished' 조건 제거
+        raceRoomSnapshot = raceRooms.filter(r => r.current > 0 && r.current < r.limit)
             .slice(0, currentRoomLimit)
             .map(r => r.id);
         
