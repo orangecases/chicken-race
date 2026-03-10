@@ -2374,6 +2374,7 @@ function loginWithGoogle() {
  * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현
  */
 function loadUserData(user) {
+async function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
     
     if (unsubscribeUserData) {
@@ -2396,16 +2397,44 @@ function loadUserData(user) {
         const userData = snapshot.data();
 
         // currentUser 객체 설정/업데이트
+    try {
+        // [수정] 'set-then-listen' 패턴으로 권한 오류를 최종 해결합니다.
+        // 1. 먼저 문서를 생성/업데이트하여 존재를 보장합니다.
+        //    - Firestore 보안 규칙에 'create'가 허용되어 있어야 합니다.
+        //    - merge:true 옵션으로 기존 유저의 데이터는 덮어쓰지 않습니다.
         const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
         const correctEmail = user.email || (providerInfo ? providerInfo.email : null);
         const isAdminUser = ADMIN_UIDS.includes(user.uid);
+        const extractedEmail = user.email || (providerInfo ? providerInfo.email : null);
+        const extractedNickname = (providerInfo ? providerInfo.displayName : null) || user.displayName;
+        let providerSuffix = "";
+        if (providerInfo) {
+            const providerId = providerInfo.providerId;
+            if (providerId.includes('kakao')) providerSuffix = " (Kakao)";
+            else if (providerId.includes('google')) providerSuffix = " (Google)";
+            else if (providerId.includes('naver')) providerSuffix = " (Naver)";
+        }
+        const finalNickname = (extractedNickname || '이름없음') + providerSuffix;
 
         currentUser = {
             ...currentUser,
             ...userData,
             email: correctEmail || userData.email,
             isAdmin: isAdminUser
+        const initialUserData = {
+            id: user.uid,
+            email: extractedEmail,
+            nickname: finalNickname,
+            coins: 10,
+            badges: { '1': 0, '2': 0, '3': 0 },
+            joinedRooms: {}
         };
+        
+        // set({ merge: true })는 문서가 없으면 생성하고, 있으면 필드를 병합합니다.
+        // 신규 유저의 경우 initialUserData로 문서가 생성됩니다.
+        // 기존 유저의 경우, 이 set은 아무것도 덮어쓰지 않지만 문서의 존재를 보장하는 역할을 합니다.
+        await userRef.set(initialUserData, { merge: true });
+        console.log("✅ User document ensured on client-side.");
 
         // 최초 로드 시에만 실행할 로직 (UI 초기화, 비정상 종료 복구 등)
         if (!initialLoadComplete) {
@@ -2413,6 +2442,13 @@ function loadUserData(user) {
 
             if (correctEmail && userData.email !== correctEmail) {
                 userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
+        // 2. 이제 문서가 확실히 존재하므로, 실시간 리스너를 안전하게 부착합니다.
+        let initialLoadComplete = false;
+        unsubscribeUserData = userRef.onSnapshot((snapshot) => {
+            // 이 시점에는 snapshot.exists가 항상 true여야 합니다.
+            if (!snapshot.exists) {
+                console.error("FATAL: User document does not exist after set-merge.");
+                return;
             }
 
             const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
@@ -2425,28 +2461,59 @@ function loadUserData(user) {
                      const userRoomState = userData.joinedRooms ? userData.joinedRooms[lastActiveRoomId] : null;
                     const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
                     performServerExit(lastActiveRoomId, !hasStartedPlaying);
+            const userData = snapshot.data();
+
+            // currentUser 객체 설정/업데이트
+            const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
+            const correctEmail = user.email || (providerInfo ? providerInfo.email : null);
+            const isAdminUser = ADMIN_UIDS.includes(user.uid);
+
+            currentUser = { ...currentUser, ...userData, email: correctEmail || userData.email, isAdmin: isAdminUser };
+
+            // 최초 로드 시에만 실행할 로직 (UI 초기화, 비정상 종료 복구 등)
+            if (!initialLoadComplete) {
+                initialLoadComplete = true;
+
+                if (correctEmail && userData.email !== correctEmail) {
+                    userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
                 }
+
+                const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
+                if (lastActiveRoomId) {
+                    sessionStorage.removeItem('activeRoomId');
+                    if (lastActiveRoomId === 'single_player_mode') {
+                        console.log('⚠️ 비정상 종료 감지: 싱글 플레이 게임을 종료 처리했습니다.');
+                    } else {
+                        console.log(`⚠️ 비정상 종료 감지: 방 [${lastActiveRoomId}]에서 퇴장 처리를 시작합니다.`);
+                        const userRoomState = userData.joinedRooms ? userData.joinedRooms[lastActiveRoomId] : null;
+                        const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
+                        performServerExit(lastActiveRoomId, !hasStartedPlaying);
+                    }
+                }
+
+                console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
+                isLoggedIn = true;
+                document.getElementById('scene-auth').classList.add('hidden');
+                roomFetchPromise = null;
+                fetchRaceRooms(false);
+                fetchMyRooms();
             }
 
-            console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
-            isLoggedIn = true;
-            document.getElementById('scene-auth').classList.add('hidden');
-            roomFetchPromise = null;
-            fetchRaceRooms(false);
+            // 데이터 변경 시마다 항상 실행할 UI 업데이트
+            updateCoinUI();
             fetchMyRooms();
-        }
-
-        // 데이터 변경 시마다 항상 실행할 UI 업데이트
-        updateCoinUI();
-        fetchMyRooms();
-        const sceneUserProfile = document.getElementById('scene-user-profile');
-        if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
-            showUserProfile();
-        }
-    }, (error) => {
-        console.error("❌ 유저 데이터 실시간 수신 실패:", error);
-        alert("유저 정보를 실시간으로 동기화하는 중 오류가 발생했습니다.");
-    });
+            const sceneUserProfile = document.getElementById('scene-user-profile');
+            if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
+                showUserProfile();
+            }
+        }, (error) => {
+            console.error("❌ 유저 데이터 실시간 수신 실패:", error);
+            alert("유저 정보를 실시간으로 동기화하는 중 오류가 발생했습니다.");
+        });
+    } catch (error) {
+        console.error("❌ 유저 데이터 초기 로딩/생성 실패:", error);
+        alert("유저 정보를 불러오는 중 오류가 발생했습니다.");
+    }
 }
 
 /**
@@ -3311,116 +3378,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // [신규] 방 삭제 버튼
     if (btnDeleteRoom) {
-        btnDeleteRoom.onclick = () => {
-            if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.remove('hidden');
-        };
-    }
-
-    // 점프/부스트 컨트롤
-    const btnJump = document.getElementById('btn-jump');
-    if (btnJump) {
-        const startJumping = (e) => {
-            e.preventDefault();
-            if (gameState === STATE.PLAYING) {
-                btnJump.classList.add('pressed');
-                isJumpPressed = true; // 누름 상태 유지
-                if (!chicken.isJumping) chicken.jump(); // 즉시 점프 시도
-            }
-        };
-        const endJumping = (e) => {
-            e.preventDefault();
-            btnJump.classList.remove('pressed');
-            isJumpPressed = false; // 누름 상태 해제
-            if (gameState === STATE.PLAYING) {
-                chicken.cutJump();
-            }
-        };
-        // [수정] addEventListener 방식으로 변경하여 터치 반응성 개선
-        btnJump.addEventListener('mousedown', startJumping);
-        btnJump.addEventListener('mouseup', endJumping);
-        btnJump.addEventListener('mouseleave', endJumping);
-        btnJump.addEventListener('touchstart', startJumping, { passive: false });
-        btnJump.addEventListener('touchend', endJumping);
-        btnJump.addEventListener('touchcancel', endJumping);
-    }
-    const btnBoost = document.getElementById('btn-boost');
-    if (btnBoost) {
-        const startBoosting = (e) => {
-            e.preventDefault();
-            if (gameState === STATE.PLAYING) {
-                btnBoost.classList.add('pressed');
-                chicken.isBoosting = true;
-            }
-        };
-        const endBoosting = (e) => {
-            e.preventDefault();
-            btnBoost.classList.remove('pressed');
-            chicken.isBoosting = false;
-        };
-        // [수정] addEventListener 방식으로 변경하여 터치 반응성 개선
-        btnBoost.addEventListener('mousedown', startBoosting);
-        btnBoost.addEventListener('mouseup', endBoosting);
-        btnBoost.addEventListener('mouseleave', endBoosting);
-        btnBoost.addEventListener('touchstart', startBoosting, { passive: false });
-        btnBoost.addEventListener('touchend', endBoosting);
-        btnBoost.addEventListener('touchcancel', endBoosting);
-    }
-
-    // [수정] 모달 내 range input 값 표시 및 프로그레스 바 업데이트
-    const setupRangeInput = (rangeId, displayId) => {
-        const rangeInput = document.getElementById(rangeId);
-        if (!rangeInput) return;
-
-        const update = () => {
-            // 1. 텍스트 값 업데이트
-            const displayEl = document.getElementById(displayId);
-            if (displayEl) displayEl.innerText = rangeInput.value;
-            
-            // [신규] 시도 횟수 슬라이더 변경 시 차감 코인 표시 업데이트
-            const displayCost = document.getElementById('display-cost');
-            if (rangeId === 'input-room-attempts' && displayCost) displayCost.innerText = rangeInput.value;
-
-            // 2. CSS 변수를 이용한 프로그레스 바 업데이트
-            const min = parseFloat(rangeInput.min) || 0;
-            const max = parseFloat(rangeInput.max) || 100;
-            const value = parseFloat(rangeInput.value);
-            const percent = ((value - min) / (max - min)) * 100;
-            rangeInput.style.setProperty('--progress-percent', `${percent}%`);
-        };
-
-        rangeInput.addEventListener('input', update);
-        update(); // 초기 로드 시 한 번 실행하여 현재 값으로 프로그레스 바를 채웁니다.
-    };
-    setupRangeInput('input-room-limit', 'display-limit');
-    setupRangeInput('input-room-attempts', 'display-attempts');
-
-    // [신규] 순위 결정 방식 토글 버튼 이벤트
-    document.querySelectorAll('#group-rank-type button').forEach(btn => {
-        btn.onclick = () => {
-            // 먼저 모든 버튼에서 active 클래스 제거
-            document.querySelectorAll('#group-rank-type button').forEach(b => b.classList.remove('active'));
-            // 클릭된 버튼에만 active 클래스 추가
-            btn.classList.add('active');
-        };
-    });
-
-    // 키보드 점프 (누르는 시간에 따라 높이 조절)
-    window.addEventListener('keydown', (e) => {
-        if (e.code === 'Space' && gameState === STATE.PLAYING) {
-            e.preventDefault(); 
-            if (!isJumpPressed) { // [신규] 처음 눌렀을 때만 실행
-                isJumpPressed = true;
-                if (!chicken.isJumping) chicken.jump();
-            }
-        }
-    });
-    window.addEventListener('keyup', (e) => {
-        if (e.code === 'Space' && gameState === STATE.PLAYING) {
-            e.preventDefault(); isJumpPressed = false; chicken.cutJump();
-        }
-    });
-
-    // [개발용] 콘솔에서 초기화 함수를 쉽게 호출할 수 있도록 window 객체에 할당
-    window.resetAdCount = resetAdCount;
-    window.resetRoomData = resetRoomData;
-});
+    
