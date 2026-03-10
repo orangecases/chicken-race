@@ -2373,29 +2373,29 @@ function loginWithGoogle() {
  * [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
  * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현
  */
-function loadUserData(user) {
+async function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
     
     // 기존 리스너가 있다면 해제
     if (unsubscribeUserData) {
         unsubscribeUserData();
+        unsubscribeUserData = null;
     }
 
-    // [FIX] 신규/기존 유저 처리 로직을 통합하여, 신규 가입 직후 `currentUser`가 즉시 할당되지 않는 문제를 해결합니다.
-    // 이 문제는 이메일이 표시되지 않는 근본적인 원인이었습니다.
-    unsubscribeUserData = userRef.onSnapshot((doc) => {
-        let userData, isNewUser = false;
+    try {
+        // 1. 먼저 문서를 한 번 가져와서 존재 여부를 확인하고 초기 데이터를 설정합니다.
+        let doc = await userRef.get();
+        let isNewUser = false;
 
-        // [FIX] 네이버/카카오 등 다양한 로그인 제공업체의 정보를 올바르게 추출합니다.
-        //       로그인 시 사용된 제공업체의 정보(providerData[0])를 우선적으로 사용합니다.
-        const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
-        const extractedEmail = user.email || (providerInfo ? providerInfo.email : null);
-        const extractedNickname = (providerInfo ? providerInfo.displayName : null) || user.displayName;
-
+        // 2. 문서가 없으면 신규 유저이므로 문서를 생성합니다.
         if (!doc.exists) {
-            // 처음 가입한 유저: 초기 데이터 생성
-            console.log("✨ 신규 유저입니다. 데이터를 초기화합니다.");
             isNewUser = true;
+            console.log("✨ 신규 유저입니다. Firestore에 문서를 생성합니다.");
+
+            const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
+            const extractedEmail = user.email || (providerInfo ? providerInfo.email : null);
+            const extractedNickname = (providerInfo ? providerInfo.displayName : null) || user.displayName;
+            
             let providerSuffix = "";
             if (providerInfo) {
                 const providerId = providerInfo.providerId;
@@ -2403,52 +2403,46 @@ function loadUserData(user) {
                 else if (providerId === 'google.com') providerSuffix = " (Google)";
                 else if (providerId === 'oidc.naver') providerSuffix = " (Naver)";
             }
-            userData = {
+
+            const newUserData = {
                 id: user.uid,
                 email: extractedEmail,
-                // [FIX] 추출한 닉네임을 사용하고, 없을 경우 '이름없음'으로 대체합니다.
                 nickname: (extractedNickname || '이름없음') + providerSuffix,
-                coins: 10, // 신규 유저 보너스
+                coins: 10,
                 badges: { '1': 0, '2': 0, '3': 0 },
                 joinedRooms: {}
             };
-            userRef.set(userData);
-        } else {
-            // 기존 유저: 서버 데이터 사용
-            console.log("🔔 서버 데이터 변경 감지!");
-            userData = doc.data();
+            
+            await userRef.set(newUserData);
+            doc = await userRef.get(); // 생성 후 데이터를 다시 읽어옵니다.
         }
 
-        // --- 공통 처리 로직 ---
-        // [FIX] 데이터베이스에 잘못된 이메일(예: UID)이 저장된 경우를 감지하고 수정하는 '자가 치유' 로직을 추가합니다.
-        //       인증 객체(user)의 이메일을 항상 최신/정확한 정보로 간주합니다.
-        const correctEmail = extractedEmail;
-        const dbEmail = userData.email;
-        const needsDbUpdate = correctEmail && (dbEmail !== correctEmail);
+        const userData = doc.data();
 
-        // [수정] 관리자 식별을 이메일 대신 고유한 UID 기준으로 변경합니다.
+        // 3. 초기 currentUser 객체를 설정합니다.
+        const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
+        const correctEmail = user.email || (providerInfo ? providerInfo.email : null);
         const isAdminUser = ADMIN_UIDS.includes(user.uid);
 
         currentUser = {
             ...userData,
-            email: correctEmail || dbEmail, // [FIX] 인증 객체의 이메일을 우선 사용합니다.
+            email: correctEmail || userData.email,
             joinedRooms: userData.joinedRooms || {},
             badges: userData.badges || { '1': 0, '2': 0, '3': 0 },
             coins: userData.coins !== undefined ? userData.coins : 10,
             isAdmin: isAdminUser
         };
 
-        // 데이터베이스의 이메일 정보가 잘못된 경우, 올바른 정보로 업데이트합니다.
-        if (needsDbUpdate) {
+        // 이메일 정보가 인증 정보와 다를 경우 업데이트 (자가 치유)
+        if (correctEmail && userData.email !== correctEmail) {
             userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
         }
 
-        // [신규] 비정상 종료(새로고침 등) 복구 로직
-        // 신규 유저가 아닌 경우에만 실행하여, 가입 직후 불필요한 처리를 방지합니다.
+        // 4. 비정상 종료 복구 로직을 '최초 1회'만 실행합니다.
         if (!isNewUser) {
             const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
             if (lastActiveRoomId) {
-                sessionStorage.removeItem('activeRoomId'); // 즉시 제거하여 무한 루프 방지
+                sessionStorage.removeItem('activeRoomId');
                 
                 if (lastActiveRoomId === 'single_player_mode') {
                     console.log('⚠️ 비정상 종료 감지: 싱글 플레이 게임을 종료 처리했습니다.');
@@ -2461,24 +2455,45 @@ function loadUserData(user) {
             }
         }
 
+        // 5. 이제 실시간 업데이트를 위한 onSnapshot 리스너를 부착합니다.
+        unsubscribeUserData = userRef.onSnapshot((snapshot) => {
+            if (!snapshot.exists) {
+                console.warn("유저 문서가 실시간 업데이트 중 삭제되었습니다. 로그아웃 처리합니다.");
+                firebase.auth().signOut();
+                return;
+            }
+            const updatedUserData = snapshot.data();
+            
+            currentUser = { ...currentUser, ...updatedUserData,
+                joinedRooms: updatedUserData.joinedRooms || {},
+                badges: updatedUserData.badges || { '1': 0, '2': 0, '3': 0 },
+            };
+            
+            updateCoinUI();
+            fetchMyRooms();
+            const sceneUserProfile = document.getElementById('scene-user-profile');
+            if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
+                showUserProfile();
+            }
+        }, (error) => {
+            console.error("❌ 유저 데이터 실시간 수신 실패:", error);
+            alert("유저 정보를 실시간으로 동기화하는 중 오류가 발생했습니다.");
+        });
+
+        // 6. 모든 초기 설정이 끝난 후, 최종 UI를 업데이트합니다.
         console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
         isLoggedIn = true;
 
-        const sceneAuth = document.getElementById('scene-auth');
-        if (sceneAuth) sceneAuth.classList.add('hidden');
+        document.getElementById('scene-auth').classList.add('hidden');
         updateCoinUI();
         roomFetchPromise = null;
         fetchRaceRooms(false);
         fetchMyRooms();
 
-        const sceneUserProfile = document.getElementById('scene-user-profile');
-        if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
-            showUserProfile();
-        }
-    }, (error) => {
-        console.error("❌ 유저 데이터 로딩 실패:", error);
+    } catch (error) {
+        console.error("❌ 유저 데이터 초기 로딩/생성 실패:", error);
         alert("유저 데이터를 불러오는 중 오류가 발생했습니다.");
-    });
+    }
 }
 
 /**
