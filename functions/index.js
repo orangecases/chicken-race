@@ -6,6 +6,42 @@ if (!admin.apps.length) {
     admin.initializeApp();
 }
 
+/**
+ * [신규] 사용자가 로그인할 때 Firestore 문서가 존재하는지 확인하고, 없으면 생성합니다.
+ * 클라이언트의 권한 문제(신규 유저 문서 읽기 불가)를 해결하기 위해 백엔드에서 처리합니다.
+ * 이 함수는 멱등성(idempotent)을 가집니다. 즉, 여러 번 호출해도 안전합니다.
+ */
+exports.ensureUserDocument = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'The function must be called while authenticated.');
+    }
+
+    const uid = context.auth.uid;
+    const userRef = admin.firestore().collection('users').doc(uid);
+
+    const doc = await userRef.get();
+
+    if (!doc.exists) {
+        console.log(`[ensureUserDocument] Creating new user document for UID: ${uid}`);
+        
+        const nickname = data.nickname;
+        if (!nickname) {
+            throw new functions.https.HttpsError('invalid-argument', 'A nickname must be provided for new users.');
+        }
+
+        const newUserData = {
+            id: uid,
+            email: context.auth.token.email || '',
+            nickname: nickname,
+            coins: 10,
+            badges: { '1': 0, '2': 0, '3': 0 },
+            joinedRooms: {}
+        };
+        await userRef.set(newUserData);
+    }
+    return { success: true };
+});
+
 exports.naverLogin = functions.https.onCall(async (data, context) => {
     let accessToken = null;
     if (typeof data === 'string') accessToken = data;
@@ -38,12 +74,14 @@ exports.naverLogin = functions.https.onCall(async (data, context) => {
         const email = naverUser.email || '';
         const nickname = naverUser.nickname || naverUser.name || '네이버유저';
 
-        // [3단계] 파이어베이스 유저 등록 및 조회
+        // [3단계] 파이어베이스 유저 및 Firestore 문서 등록/조회
         try {
+            let isNewUser = false;
             try {
                 await admin.auth().getUser(uid);
             } catch (authErr) {
                 if (authErr.code === 'auth/user-not-found') {
+                    isNewUser = true;
                     await admin.auth().createUser({
                         uid: uid,
                         email: email,
@@ -53,8 +91,14 @@ exports.naverLogin = functions.https.onCall(async (data, context) => {
                     throw authErr;
                 }
             }
+            // [신규] 신규 유저일 경우, Firestore 문서도 함께 생성합니다.
+            if (isNewUser) {
+                const userRef = admin.firestore().collection('users').doc(uid);
+                const newUserData = { id: uid, email, nickname: nickname + " (Naver)", coins: 10, badges: { '1': 0, '2': 0, '3': 0 }, joinedRooms: {} };
+                await userRef.set(newUserData);
+            }
         } catch (userErr) {
-            throw new Error(`[3단계 실패] 파이어베이스 유저 생성 오류: ${userErr.message}`);
+            throw new Error(`[3단계 실패] 파이어베이스 유저/문서 생성 오류: ${userErr.message}`);
         }
 
         // [4단계] 커스텀 토큰 발급 (★ 가장 에러가 많이 나는 구간)
