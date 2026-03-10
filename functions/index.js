@@ -6,6 +6,42 @@ if (!admin.apps.length) {
     admin.initializeApp();
 }
 
+/**
+ * [신규] Firebase Auth에 새로운 사용자가 생성될 때마다 자동으로 호출되는 함수입니다.
+ * 사용자의 프로필 정보를 Firestore에 생성하여, 클라이언트의 권한 문제를 원천적으로 해결합니다.
+ */
+exports.createProfileOnSignUp = functions.auth.user().onCreate(async (user) => {
+    const { uid, email, displayName, providerData } = user;
+    console.log(`[Auth Trigger] New user signed up: ${uid}. Creating profile.`);
+
+    const userRef = admin.firestore().collection('users').doc(uid);
+
+    // 닉네임 및 소셜 로그인 제공자 정보 설정
+    const providerInfo = providerData && providerData[0] ? providerData[0] : null;
+    const extractedNickname = displayName || (providerInfo ? providerInfo.displayName : null);
+    let providerSuffix = "";
+    if (providerInfo) {
+        const providerId = providerInfo.providerId;
+        if (providerId.includes('kakao')) providerSuffix = " (Kakao)";
+        else if (providerId.includes('google')) providerSuffix = " (Google)";
+        else if (providerId.includes('naver')) providerSuffix = " (Naver)";
+        else if (providerId.includes('facebook')) providerSuffix = " (Facebook)";
+    }
+    const finalNickname = (extractedNickname || '이름없음') + providerSuffix;
+
+    const newUserData = {
+        id: uid,
+        email: email || '',
+        nickname: finalNickname,
+        coins: 10,
+        badges: { '1': 0, '2': 0, '3': 0 },
+        joinedRooms: {}
+    };
+
+    // Firestore에 새로운 사용자 문서 생성
+    return userRef.set(newUserData);
+});
+
 exports.naverLogin = functions.https.onCall(async (data, context) => {
     let accessToken = null;
     if (typeof data === 'string') accessToken = data;
