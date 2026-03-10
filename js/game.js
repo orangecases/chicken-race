@@ -6,7 +6,7 @@
 if (window.location.hash.includes('access_token')) {
     const params = new URLSearchParams(window.location.hash.substring(1));
     const token = params.get('access_token');
-    
+
     // 이 창이 팝업창인지 확인하고 부모 창으로 토큰 전달
     if (window.opener) {
         window.opener.postMessage({ type: 'NAVER_LOGIN', token: token }, '*');
@@ -35,7 +35,7 @@ let top100Scores = []; // Top 100 더미 데이터
 let nextLevelFrameThreshold = 600; // [수정] 난이도 상승 기준 (프레임 단위, 600프레임 ≒ 10초)
 let currentGameMode = 'single';
 let isGameReady = false;
-let gameLoopId = null; 
+let gameLoopId = null;
 let isSoundOn = true; // [신규] 사운드 상태 (true: ON, false: OFF)
 let isLoggedIn = false; // [신규] 로그인 상태
 let currentUser = null; // [신규] 로그인한 사용자 정보
@@ -93,7 +93,7 @@ let speedMultiplier = 1;
 const FRICTION = 0.96;
 const GRAVITY = 1.2;
 const JUMP_FORCE = 30;
-const FLOOR_Y = GAME_HEIGHT - 124 - 128; 
+const FLOOR_Y = GAME_HEIGHT - 124 - 128;
 
 // [2. 리소스 로딩]
 const imageSources = {
@@ -166,12 +166,12 @@ const chicken = {
                     this.jump();
                 }
             }
-            if (this.isBoosting) { 
-                this.targetX = 550; this.frameDelay = 4; this.x += (this.targetX - this.x) * 0.008; 
+            if (this.isBoosting) {
+                this.targetX = 550; this.frameDelay = 4; this.x += (this.targetX - this.x) * 0.008;
                 this.boostProgress = Math.min(100, this.boostProgress + 0.5); // [수정] 부스트 시 게이지 상승
             }
-            else { 
-                this.targetX = 100; this.frameDelay = 8; this.x += (this.targetX - this.x) * 0.005; 
+            else {
+                this.targetX = 100; this.frameDelay = 8; this.x += (this.targetX - this.x) * 0.005;
                 this.boostProgress = Math.max(0, this.boostProgress - 1); // [수정] 미사용 시 게이지 하락
             }
         } else if (gameState === STATE.CRASHED) {
@@ -179,7 +179,7 @@ const chicken = {
             this.y += this.dy; this.dy += GRAVITY;
             if (this.y >= FLOOR_Y) { this.y = FLOOR_Y; this.dy = 0; }
         }
-    },    
+    },
     draw() {
         let sprite;
         if (gameState === STATE.PLAYING) {
@@ -210,7 +210,7 @@ const chicken = {
 class Dog {
     constructor() {
         this.width = 320; this.height = 144; this.initialX = -350; this.x = this.initialX; this.y = GAME_HEIGHT - 124 - 144;
-        this.frame = 0; this.frameDelay = 5; this.targetX = this.initialX; 
+        this.frame = 0; this.frameDelay = 5; this.targetX = this.initialX;
     }
     update() {
         if (gameState !== STATE.PLAYING) { this.targetX = this.initialX; this.x += (this.targetX - this.x) * 0.05; }
@@ -233,11 +233,11 @@ class Obstacle {
         this.type = type; this.markedForDeletion = false;
         if (type === 'fire') {
             this.width = 168; this.height = 168; this.y = GAME_HEIGHT - 124 - 168;
-            this.frame = 0; this.maxFrame = 6; this.frameDelay = 4; 
+            this.frame = 0; this.maxFrame = 6; this.frameDelay = 4;
             // [수정] 불꽃 장애물의 판정 범위를 줄여서(width: 80->50) 피하기 쉽게 조정
             this.hitbox = { xOffset: 60, yOffset: 40, width: 50, height: 100 };
         } else {
-            this.width = 280; this.height = 144; this.y = GAME_HEIGHT - 124 - 168 - 120; 
+            this.width = 280; this.height = 144; this.y = GAME_HEIGHT - 124 - 168 - 120;
             this.frame = 0; this.hitbox = { xOffset: 20, yOffset: 40, width: 240, height: 60 };
         }
         this.x = GAME_WIDTH;
@@ -269,25 +269,25 @@ class Feather {
         this.x = x; this.y = y;
         const types = ['featherLg', 'featherMd', 'featherSm'];
         this.imageKey = types[Math.floor(Math.random() * types.length)];
-        
+
         // 폭발하듯 퍼지는 초기 속도 (사방으로 퍼짐)
         const angle = Math.random() * Math.PI * 2;
         const speed = 5 + Math.random() * 15;
         this.vx = Math.cos(angle) * speed;
         this.vy = Math.sin(angle) * speed - 1; // [수정] 위쪽으로 솟구치는 힘을 줄임 (-5 -> -2)
-        
+
         this.gravity = 0.4; // 가볍게 떨어지도록 낮은 중력
         this.friction = 0.94; // 공기 저항
-        
+
         this.rotation = Math.random() * 360;
         this.rotationSpeed = (Math.random() - 0.5) * 15; // 빙글빙글 회전
-        
+
         this.scale = 0.4 + Math.random() * 0.6; // 크기 랜덤
         this.opacity = 1;
         this.fadeSpeed = 0.01 + Math.random() * 0.02; // 천천히 사라짐
-        
+
         this.flip = Math.random() < 0.5 ? 1 : -1; // [핵심] 좌우 반전 (1: 원본-왼쪽, -1: 반전-오른쪽)
-        
+
         // 좌우 흔들림 (Sway) - 떨어질 때 살랑거리는 효과
         this.swayPhase = Math.random() * Math.PI * 2;
         this.swaySpeed = 0.1;
@@ -297,11 +297,11 @@ class Feather {
         this.y += this.vy;
         this.vy += this.gravity;
         this.vx *= this.friction;
-        
+
         // 공기 저항으로 인한 좌우 흔들림 추가
         this.x += Math.sin(this.swayPhase) * 2;
         this.swayPhase += this.swaySpeed;
-        
+
         this.rotation += this.rotationSpeed;
         this.opacity -= this.fadeSpeed;
     }
@@ -522,17 +522,17 @@ function startAutoActionTimer(duration, type, selector) {
     }
     const el = document.querySelector(selector);
     if (!el) return;
-    
+
     el.style.display = 'block';
     let timeLeft = duration;
-    
+
     const updateText = () => {
         if (type === 'exit') el.innerText = `${timeLeft}초 후 자동 아웃`; // 로비 퇴장
         else if (type === 'deductAttempt') el.innerText = `${timeLeft}초 후 1회 차감`; // 시도 횟수 차감
         else el.innerText = `${timeLeft}초 후 자동 시작`;
     };
     updateText();
-    
+
     autoActionTimer = setInterval(() => {
         timeLeft--;
         if (timeLeft <= 0) {
@@ -558,7 +558,8 @@ function startAutoActionTimer(duration, type, selector) {
                 //     const btnRestart = document.getElementById('btn-restart');
                 //     if (btnRestart && btnRestart.style.display !== 'none') btnRestart.click();
                 // }
-            }        } else {
+            }
+        } else {
             updateText();
         }
     }, 1000);
@@ -569,18 +570,18 @@ function resetGame() {
     gameState = STATE.IDLE; // [수정] 초기 상태를 IDLE(대기)로 설정하여 봇 시뮬레이션만 수행
     stopBGM(); // [신규] 리셋 시 BGM 정지 (시작 버튼 누를 때 재생)
     baseGameSpeed = 15; // [수정] 기본 속도 상향 (10 -> 12)
-    gameSpeed = baseGameSpeed; 
-    gameFrame = 0; 
-    score = 0; 
+    gameSpeed = baseGameSpeed;
+    gameFrame = 0;
+    score = 0;
     level = 1; // [신규] 레벨 초기화
     nextLevelFrameThreshold = 600; // [수정] 시간 기준 초기화
     isJumpPressed = false; // [수정] 점프 입력 상태 즉시 초기화
     obstacleTimer = 0;
     skyBg.x = 0; floorBg.x = 0; obstacles = []; feathers = []; // [신규] 깃털 초기화
-    chicken.y = FLOOR_Y; chicken.dy = 0; chicken.x = 100; chicken.targetX = 100; 
+    chicken.y = FLOOR_Y; chicken.dy = 0; chicken.x = 100; chicken.targetX = 100;
     chicken.isBoosting = false; chicken.boostProgress = 0; chicken.crashFrame = 0; // [수정] 부스트 및 게이지 즉시 초기화
     dog.x = dog.initialX; dog.targetX = dog.initialX;
-    
+
     document.getElementById('game-over-screen').classList.add('hidden');
     document.getElementById('game-start-screen').classList.add('hidden');
     document.getElementById('game-pause-screen').classList.add('hidden');
@@ -590,7 +591,7 @@ function resetGame() {
     if (btnJump) btnJump.classList.remove('pressed');
     const btnBoost = document.getElementById('btn-boost');
     if (btnBoost) btnBoost.classList.remove('pressed');
-    
+
     // HUD 점수 초기화
     const scoreEl = document.querySelector('.hud-score');
     const levelEl = document.querySelector('.hud-level');
@@ -599,7 +600,7 @@ function resetGame() {
         scoreEl.classList.remove('green', 'yellow', 'orange', 'red');
     }
     if (levelEl) levelEl.innerText = 'LV.' + level;
-    
+
     // 일시정지 버튼 아이콘 초기화
     const btnPauseToggle = document.getElementById('btn-pause-toggle');
     if (btnPauseToggle) btnPauseToggle.classList.remove('paused');
@@ -625,12 +626,12 @@ function saveScoreToFirebase(finalScore) {
         score: finalScore,
         timestamp: firebase.firestore.FieldValue.serverTimestamp() // 서버 시간 기록
     })
-    .then((docRef) => {
-        console.log("✅ 점수가 서버에 기록되었습니다! ID:", docRef.id);
-    })
-    .catch((error) => {
-        console.error("❌ 점수 저장 실패:", error);
-    });
+        .then((docRef) => {
+            console.log("✅ 점수가 서버에 기록되었습니다! ID:", docRef.id);
+        })
+        .catch((error) => {
+            console.error("❌ 점수 저장 실패:", error);
+        });
 }
 
 function handleGameOverUI() {
@@ -643,7 +644,7 @@ function handleGameOverUI() {
 
     if (currentGameMode === 'single') {
         const finalScore = Math.floor(score);
-        
+
         // [신규] 이번 기록을 '내 기록'에 저장
         saveMyScore(finalScore);
         saveScoreToFirebase(finalScore); // [신규] Firebase에 점수 저장
@@ -663,7 +664,7 @@ function handleGameOverUI() {
 
         // [FIX] myPlayer.attemptsLeft는 onSnapshot에 의해 덮어쓰여질 수 있으므로, 지역 변수로 남은 횟수를 명확하게 계산하고 사용합니다.
         const attemptsLeft = currentRoom.attempts - userUsedAttempts;
-        
+
         // [FIX] 충돌 직후 점수가 NaN이 되는 문제 해결
         // 충돌 시 score가 NaN이 되는 경우를 방지하기 위해 유효성 검사 추가
         let validScore = score;
@@ -690,7 +691,7 @@ function handleGameOverUI() {
         } else {
             govTitle.innerText = "GAME OVER";
             govMsg.innerText = "모든 시도 횟수를 사용했습니다.";
-            
+
             // [신규] 멀티플레이 상태 업데이트 (탈락/종료)
             if (myPlayer) myPlayer.status = 'dead';
             // [2단계] Firestore 상태 업데이트
@@ -720,7 +721,7 @@ function handleGameOverUI() {
     govScreen.classList.remove('hidden');
     setControlsVisibility(false); // [수정] 게임 종료 시 컨트롤 버튼 숨김
 
-    renderRoomLists(); 
+    renderRoomLists();
     renderMultiRanking(); // [신규] 게임 오버 시 랭킹 즉시 갱신
 }
 
@@ -756,15 +757,15 @@ function handleMultiplayerTick() {
         // [FIX] CRASHED 상태에서도 업데이트 허용 (status는 로컬에서 아직 playing일 수 있음)
         if (myPlayer && (myPlayer.status === 'playing' || myPlayer.status === 'waiting')) {
             const myDocRef = participantsRef.doc(myId);
-            
+
             // [FIX] NaN 문제 해결: onSnapshot으로 덮어쓰여질 수 있는 myPlayer.score 대신,
             // 항상 최신 상태인 전역 변수 score를 직접 사용하여 계산합니다.
             const currentRunScore = (typeof score === 'number' && !isNaN(score)) ? score : 0;
-            
+
             const displayScore = (currentRoom.rankType === 'total')
                 ? (myPlayer.totalScore || 0) + currentRunScore
                 : Math.max((myPlayer.bestScore || 0), currentRunScore);
-            
+
             // NaN 체크 후 displayScore만 업데이트 (status 업데이트는 다른 곳에서 담당)
             if (!isNaN(displayScore)) {
                 batch.update(myDocRef, {
@@ -810,7 +811,7 @@ function handleMultiplayerTick() {
                 }
 
                 const botDisplayScore = (currentRoom.rankType === 'total') ? totalScore + score : Math.max(bestScore, score);
-                
+
                 // [FIX] NaN 점수가 데이터베이스에 기록되는 것을 방지합니다.
                 if (isNaN(botDisplayScore)) {
                     console.error("Bot display score is NaN! Skipping update for bot:", bot.id);
@@ -833,7 +834,7 @@ function handleMultiplayerTick() {
 
         batch.commit().catch(err => console.error("Firestore 일괄 업데이트 실패:", err));
     }
-    
+
     // 4. 모든 플레이어의 게임 종료 여부 확인
     // [수정] 방이 꽉 찼고(currentPlayers === maxPlayers), 모든 참가자가 게임을 완료했을 때만 'finished' 상태로 변경합니다.
     // 이전 로직은 방이 꽉 차지 않아도 현재 참가자 전원이 완료하면 'finished'로 변경하는 문제가 있었습니다.
@@ -853,15 +854,15 @@ function gameLoop() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         skyBg.draw(0); floorBg.draw(GAME_HEIGHT - 124);
         dog.draw(); chicken.draw(); // 정적 그리기
-        
+
         // [핵심] 대기 상태에서도 멀티플레이 로직(봇 점수 계산 등)은 계속 실행되어야 함
         handleMultiplayerTick();
-        
+
         gameLoopId = requestAnimationFrame(gameLoop);
         return;
     }
 
-    if (gameState === STATE.PLAYING) {        
+    if (gameState === STATE.PLAYING) {
         // 1. 부스트 보너스 계산 (하이리스크 하이리턴)
         let boostBonus = 0;
         if (chicken.boostProgress >= 100) boostBonus = 0.6;     // MAX 도달 시에만: +60% (RED)
@@ -871,10 +872,10 @@ function gameLoop() {
 
         // 2. 거리(점수) 계산: 게임 속도에 보너스 배율 적용
         score += (gameSpeed * 0.05) * (1 + boostBonus);
-        
+
         // 3. 난이도 조절: 시간에 따라 게임 속도 증가 (프레임 기준)
         if (gameFrame >= nextLevelFrameThreshold) {
-            baseGameSpeed += 0.8; 
+            baseGameSpeed += 0.8;
             nextLevelFrameThreshold += 600; // 다음 레벨까지 10초 추가
             level++;
             const levelEl = document.querySelector('.hud-level');
@@ -898,19 +899,19 @@ function gameLoop() {
                 const myPlayer = multiGamePlayers.find(p => p.id === myId);
                 if (myPlayer) displayVal += Math.floor(myPlayer.totalScore);
             }
-            
+
             // [수정] 구조화된 HUD 업데이트
             scoreEl.querySelector('.score-val').innerText = displayVal.toLocaleString();
         }
 
         // 부스트 및 기본 속도 조절
-        if (chicken.isBoosting) { 
+        if (chicken.isBoosting) {
             if (gameSpeed < baseGameSpeed + 5) gameSpeed += 0.2; // [수정] 부스트 가속도 및 최대 속도 감소 (+10 -> +5, 0.5 -> 0.2)
-            speedMultiplier = 2; 
-        } else { 
+            speedMultiplier = 2;
+        } else {
             if (gameSpeed > baseGameSpeed) gameSpeed -= 0.2; // 부스트 해제 시 기본 속도로 서서히 복귀
             else gameSpeed = baseGameSpeed; // 속도가 기본보다 낮아지지 않도록 보정
-            speedMultiplier = 1; 
+            speedMultiplier = 1;
         }
     } else if (gameState === STATE.CRASHED) {
         gameSpeed *= FRICTION;
@@ -957,7 +958,7 @@ function gameLoop() {
     handleObstacles(); chicken.update(); chicken.draw();
     feathers.forEach(f => { f.update(); f.draw(); });
     feathers = feathers.filter(f => f.opacity > 0); // 사라진 깃털 제거
-    
+
     gameFrame++;
 
     gameLoopId = requestAnimationFrame(gameLoop);
@@ -1043,7 +1044,7 @@ function renderMyRecordList(append = false) {
     // 현재 표시된 개수 이후부터 다음 20개를 가져옴
     const currentItemsCount = listEl.querySelectorAll('li:not(.top)').length + (listEl.querySelector('li.top') ? 1 : 0);
     const startIndex = append ? currentItemsCount : 0;
-    
+
     // [보정] 표시할 개수가 전체 데이터 길이를 넘지 않도록 설정
     const itemsToShow = myScores.slice(startIndex, Math.min(displayedMyRecordsCount, myScores.length));
 
@@ -1076,7 +1077,7 @@ function renderTop100List() {
         const rank = entry.rank;
         const li = document.createElement('li');
         let rankDisplay = (rank === 1) ? `<img class="icon" src="assets/images/icon_flag1th.png" />` : (rank === 2) ? `<img class="icon" src="assets/images/icon_flag2th.png" />` : (rank === 3) ? `<img class="icon" src="assets/images/icon_flag3th.png" />` : `${rank}<small>th</small>`;
-        
+
         li.innerHTML = `<span class="stat">${rankDisplay}</span><div class="info"><p class="score-display">${entry.score.toLocaleString()}<small>M</small></p></div><div class="more"><span>${entry.name}</span></div>`;
         listEl.appendChild(li);
     });
@@ -1097,23 +1098,23 @@ function displayRankings(rankData) {
 function loadLeaderboard() {
     // 1. 'rankings' 상자에서 점수(score)가 높은 순(desc)으로 10개만 가져와라!
     db.collection("rankings")
-      .orderBy("score", "desc")
-      .limit(10)
-      .get()
-      .then((querySnapshot) => {
-          console.log("🏆 랭킹 데이터를 가져왔습니다:");
-          
-          let rankData = [];
-          querySnapshot.forEach((doc) => {
-              rankData.push(doc.data()); // nickname, score 등이 담겨 있음
-          });
+        .orderBy("score", "desc")
+        .limit(10)
+        .get()
+        .then((querySnapshot) => {
+            console.log("🏆 랭킹 데이터를 가져왔습니다:");
 
-          // 2. 이 데이터를 화면에 그리는 함수에 전달하세요!
-          displayRankings(rankData); 
-      })
-      .catch((error) => {
-          console.error("❌ 랭킹 불러오기 실패:", error);
-      });
+            let rankData = [];
+            querySnapshot.forEach((doc) => {
+                rankData.push(doc.data()); // nickname, score 등이 담겨 있음
+            });
+
+            // 2. 이 데이터를 화면에 그리는 함수에 전달하세요!
+            displayRankings(rankData);
+        })
+        .catch((error) => {
+            console.error("❌ 랭킹 불러오기 실패:", error);
+        });
 }
 
 /**
@@ -1249,7 +1250,7 @@ async function fetchMyRooms() {
 
     // [수정] currentMyRoomLimit 만큼 ID를 가져옵니다.
     const targetIds = roomIds.slice(0, currentMyRoomLimit);
-    
+
     // [수정] Firestore 'in' 쿼리는 최대 10개 제한이 있으므로, 10개씩 끊어서 요청합니다.
     const chunks = [];
     for (let i = 0; i < targetIds.length; i += 10) {
@@ -1259,12 +1260,12 @@ async function fetchMyRooms() {
     try {
         const promises = chunks.map(chunk => db.collection('rooms').where(firebase.firestore.FieldPath.documentId(), 'in', chunk).get());
         const snapshots = await Promise.all(promises);
-        
+
         myRooms = [];
         snapshots.forEach(snap => {
             snap.docs.forEach(doc => myRooms.push(mapFirestoreDocToRoom(doc)));
         });
-        
+
         renderRoomLists(true);
     } catch (e) {
         console.error("❌ 내 방 목록 로드 실패:", e);
@@ -1358,7 +1359,7 @@ async function performServerExit(roomId, isFullExit) {
     try {
         if (isFullExit) {
             console.log(`🚀 Server Exit: Performing FULL exit from room [${roomId}].`);
-            
+
             const participantsSnapshot = await roomRef.collection('participants').get();
             const myParticipantDoc = participantsSnapshot.docs.find(doc => doc.id === myId);
 
@@ -1394,7 +1395,7 @@ async function performServerExit(roomId, isFullExit) {
             }
         } else { // Soft Exit (Forfeit)
             console.log(`🚀 Server Exit: Performing SOFT exit (forfeit) from room [${roomId}].`);
-            
+
             const roomDoc = await roomRef.get();
             if (!roomDoc.exists) return;
             const roomData = roomDoc.data();
@@ -1441,7 +1442,7 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
     multiGamePlayers = [];
     clearAutoActionTimer();
     currentRoom = null; // 현재 방 컨텍스트 초기화
-    
+
     updateCoinUI();
 
     // [FIX] 방 퇴장 후 목록이 갱신되지 않는 문제 해결:
@@ -1505,7 +1506,7 @@ async function attemptToJoinRoom(room) {
         alert(`코인이 부족합니다. (필요: ${cost}, 보유: ${currentUser.coins})`);
         return;
     }
-    
+
     const roomRef = db.collection('rooms').doc(room.id);
     try {
         // [FIX] 방 참가 로직을 단일 트랜잭션으로 통합하여 원자성을 보장합니다.
@@ -1577,7 +1578,7 @@ function renderMultiRanking() {
     // 1. 정렬 기준에 따라 점수 계산 및 정렬
     const isTotalMode = currentRoom.rankType === 'total';
     const myId = currentUser ? currentUser.id : 'me';
-    
+
     const sortedPlayers = [...multiGamePlayers].sort((a, b) => {
         // [FIX] 내 점수는 로컬 점수를 기준으로 정렬에 참여시켜 순위가 즉시 반영되도록 합니다.
         const scoreA = a.id === myId ? calculateMyLocalDisplayScore() : (a.displayScore || 0);
@@ -1593,7 +1594,7 @@ function renderMultiRanking() {
     sortedPlayers.forEach((p, index) => {
         const rank = index + 1;
         const li = document.createElement('li');
-        
+
         // [신규] 방장 여부 확인
         const isHost = currentRoom.creatorUid && p.id === currentRoom.creatorUid;
         const hostIndicatorText = isHost ? `(방장)` : '';
@@ -1602,7 +1603,7 @@ function renderMultiRanking() {
         // 상태에 따른 캐릭터 스타일 및 이미지
         let charClass = 'character';
         let charImg = 'assets/images/chicken_back.png'; // 기본(대기)
-        
+
         if (p.status === 'playing') {
             charClass += ' active';
             charImg = 'assets/images/chickenRun.gif';
@@ -1616,7 +1617,7 @@ function renderMultiRanking() {
         if (p.id === myId) {
             charClass += ' me';
         }
-        
+
         // [수정] 점수가 0이면서 대기중인 경우에만 '대기중' 표시 (그 외에는 순위 표시)
         // [3단계] displayScore가 0이고 waiting 상태일 때 '대기중' 표시
         let statHtml = '';
@@ -1699,7 +1700,7 @@ let myRoomSnapshot = [];
 function renderRoomLists(refreshSnapshot = false) {
     const raceRoomList = document.querySelector('#content-race-room .score-list');
     const myRoomList = document.querySelector('#content-my-rooms .score-list');
-    if(!raceRoomList || !myRoomList) return;
+    if (!raceRoomList || !myRoomList) return;
 
     // [신규] 스냅샷 갱신 로직: 목록이 흔들리지 않도록 특정 시점에만 목록 구성을 확정합니다.
     if (refreshSnapshot) {
@@ -1713,7 +1714,7 @@ function renderRoomLists(refreshSnapshot = false) {
         raceRoomSnapshot = raceRooms.filter(r => r.current > 0 && r.current < r.limit)
             .slice(0, currentRoomLimit)
             .map(r => r.id);
-        
+
         // 2. 내 방 스냅샷: fetchMyRooms로 가져온 데이터 사용
         myRoomSnapshot = myRooms.map(r => r.id);
     }
@@ -1731,9 +1732,9 @@ function renderRoomLists(refreshSnapshot = false) {
 
         const rankTypeText = room.rankType === 'total' ? '합산점' : '최고점';
         const lockImg = room.isLocked ? `<img class="lock" src="assets/images/icon_lock.png">` : '';
-        
+
         // [신규] 디버깅용 봇 추가/삭제 버튼 HTML
-        const debugButtonsHTML = (currentUser && currentUser.isAdmin) 
+        const debugButtonsHTML = (currentUser && currentUser.isAdmin)
             ? `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`
             : '';
 
@@ -1751,7 +1752,7 @@ function renderRoomLists(refreshSnapshot = false) {
 
             // [FIX] 인원이 가득 찬 방의 상태와 입장 가능 여부를 명확히 처리합니다.
             const isFull = room.current >= room.limit;
-            const statusClass = isFull ? 'finished' : 'inprogress'; 
+            const statusClass = isFull ? 'finished' : 'inprogress';
             const aggIcon = room.limit >= 4 ? '<img class="agg" src="assets/images/icon_agg.png">' : '';
             const statusText = isFull ? `${aggIcon}마감: ${room.current}/${room.limit}명` : `${aggIcon}모집: ${room.current}/${room.limit}명`;
 
@@ -1900,7 +1901,7 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
     }
 
     currentGameMode = mode;
-    currentRoom = roomData; 
+    currentRoom = roomData;
 
     // [신규] 비정상 종료 복구를 위해 현재 게임 상태를 세션 스토리지에 기록합니다.
     if (mode === 'multi' && roomData) {
@@ -1997,7 +1998,7 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
             // [2단계] 서버 데이터가 진실 공급원이므로, 클라이언트에서 임의로 상태를 변경할 필요가 없습니다.
             // onSnapshot 리스너가 서버의 최종 상태를 정확히 반영해줍니다.
             if (myPlayerInRoom) myPlayerInRoom.status = 'dead';
-            
+
             // 2. 'GAME OVER' 화면을 표시하고 즉시 함수를 종료하여, '시작' 화면이 표시되지 않도록 합니다.
             resetGame();
             gameState = STATE.GAMEOVER;
@@ -2037,7 +2038,7 @@ async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함
             drawStaticFrame();
             gameState = STATE.GAMEOVER; // 상태 동기화
             document.getElementById('game-over-screen').classList.remove('hidden');
-            handleGameOverUI(); 
+            handleGameOverUI();
             renderMultiRanking();
             return;
         }
@@ -2071,7 +2072,7 @@ function showPasswordInput(room) {
     const scene = document.getElementById('scene-password-input');
     const input = document.getElementById('input-room-password');
     const msg = document.getElementById('password-message');
-    
+
     if (input) input.value = '';
     if (msg) {
         msg.innerText = '';
@@ -2286,7 +2287,7 @@ function watchAdAndGetReward() {
             // [수정] 버튼 하나로 통합: 텍스트와 스타일, 동작을 변경
             if (btnCloseVideo) {
                 btnCloseVideo.innerText = "시청완료 ❯❯";
-                
+
                 // 클릭 이벤트 재정의 (보상 획득 로직으로 교체)
                 btnCloseVideo.onclick = () => {
                     const viewLoading = document.getElementById('ad-view-loading');
@@ -2313,7 +2314,7 @@ function watchAdAndGetReward() {
     // 여기서는 간단히 document 레벨에서 처리하거나, 화면 전환 시점에 처리.
     // 위 코드 구조상 btnRewardSkip 클릭 핸들러 안에서는 DOM이 이미 존재하므로
     // btn-ad-close에 대한 처리는 아래와 같이 수정합니다.
-    
+
     // [수정] 보상 화면 닫기 버튼은 정적 HTML 문자열에 포함되어 있으므로
     // 화면 전환 로직과 무관하게 미리 바인딩 가능 (단, 요소가 DOM에 추가된 직후)
     const btnCloseReward = document.getElementById('btn-ad-close');
@@ -2358,7 +2359,7 @@ function loginWithGoogle() {
     // [FIX] 구글 로그인 시 이메일과 프로필 정보를 명시적으로 요청합니다. (Scope 추가)
     provider.addScope('profile');
     provider.addScope('email');
-    
+
     // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 감지합니다.
     firebase.auth().signInWithPopup(provider).catch((error) => {
         console.error("❌ 로그인 팝업 실패:", error.message);
@@ -2373,102 +2374,65 @@ function loginWithGoogle() {
  * [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
  * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현
  */
-function loadUserData(user) {
+/**
+ * [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
+ * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현 및 비정상 종료 복구 (F5 등)
+ */
 async function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
-    
+
     if (unsubscribeUserData) {
         unsubscribeUserData();
         unsubscribeUserData = null;
     }
-    
-    // [수정] 이제 사용자 문서 생성은 백엔드(Cloud Function)에서 자동으로 처리됩니다.
-    // 클라이언트는 문서가 생성될 때까지 기다렸다가 데이터를 읽기만 하면 되므로, 권한 오류가 발생하지 않습니다.
-    // onSnapshot은 문서가 없다가 생성되면 자동으로 감지하여 데이터를 가져옵니다.
-    let initialLoadComplete = false;
-    unsubscribeUserData = userRef.onSnapshot((snapshot) => {
-        // 문서가 아직 생성되지 않았을 수 있습니다. 이 경우 스냅샷은 존재하지 않으며,
-        // 백엔드에서 문서를 생성하면 이 리스너가 다시 호출됩니다.
-        if (!snapshot.exists) {
-            console.log("사용자 프로필을 기다리는 중...");
-            return;
-        }
 
-        const userData = snapshot.data();
-
-        // currentUser 객체 설정/업데이트
     try {
-        // [수정] 'set-then-listen' 패턴으로 권한 오류를 최종 해결합니다.
-        // 1. 먼저 문서를 생성/업데이트하여 존재를 보장합니다.
-        //    - Firestore 보안 규칙에 'create'가 허용되어 있어야 합니다.
-        //    - merge:true 옵션으로 기존 유저의 데이터는 덮어쓰지 않습니다.
         const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
         const correctEmail = user.email || (providerInfo ? providerInfo.email : null);
         const isAdminUser = ADMIN_UIDS.includes(user.uid);
-        const extractedEmail = user.email || (providerInfo ? providerInfo.email : null);
         const extractedNickname = (providerInfo ? providerInfo.displayName : null) || user.displayName;
         let providerSuffix = "";
+
         if (providerInfo) {
             const providerId = providerInfo.providerId;
             if (providerId.includes('kakao')) providerSuffix = " (Kakao)";
             else if (providerId.includes('google')) providerSuffix = " (Google)";
             else if (providerId.includes('naver')) providerSuffix = " (Naver)";
         }
+
         const finalNickname = (extractedNickname || '이름없음') + providerSuffix;
 
-        currentUser = {
-            ...currentUser,
-            ...userData,
-            email: correctEmail || userData.email,
-            isAdmin: isAdminUser
         const initialUserData = {
             id: user.uid,
-            email: extractedEmail,
+            email: correctEmail,
             nickname: finalNickname,
             coins: 10,
             badges: { '1': 0, '2': 0, '3': 0 },
             joinedRooms: {}
         };
-        
+
         // set({ merge: true })는 문서가 없으면 생성하고, 있으면 필드를 병합합니다.
-        // 신규 유저의 경우 initialUserData로 문서가 생성됩니다.
-        // 기존 유저의 경우, 이 set은 아무것도 덮어쓰지 않지만 문서의 존재를 보장하는 역할을 합니다.
         await userRef.set(initialUserData, { merge: true });
         console.log("✅ User document ensured on client-side.");
 
-        // 최초 로드 시에만 실행할 로직 (UI 초기화, 비정상 종료 복구 등)
-        if (!initialLoadComplete) {
-            initialLoadComplete = true;
-
-            if (correctEmail && userData.email !== correctEmail) {
-                userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
-        // 2. 이제 문서가 확실히 존재하므로, 실시간 리스너를 안전하게 부착합니다.
         let initialLoadComplete = false;
+
+        // 문서가 확실히 존재하므로, 실시간 리스너를 안전하게 부착합니다.
         unsubscribeUserData = userRef.onSnapshot((snapshot) => {
-            // 이 시점에는 snapshot.exists가 항상 true여야 합니다.
             if (!snapshot.exists) {
                 console.error("FATAL: User document does not exist after set-merge.");
                 return;
             }
 
-            const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
-            if (lastActiveRoomId) {
-                sessionStorage.removeItem('activeRoomId');
-                if (lastActiveRoomId === 'single_player_mode') {
-                    console.log('⚠️ 비정상 종료 감지: 싱글 플레이 게임을 종료 처리했습니다.');
-                } else {
-                    console.log(`⚠️ 비정상 종료 감지: 방 [${lastActiveRoomId}]에서 퇴장 처리를 시작합니다.`);
-                     const userRoomState = userData.joinedRooms ? userData.joinedRooms[lastActiveRoomId] : null;
-                    const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
-                    performServerExit(lastActiveRoomId, !hasStartedPlaying);
             const userData = snapshot.data();
 
             // currentUser 객체 설정/업데이트
-            const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
-            const correctEmail = user.email || (providerInfo ? providerInfo.email : null);
-            const isAdminUser = ADMIN_UIDS.includes(user.uid);
-
-            currentUser = { ...currentUser, ...userData, email: correctEmail || userData.email, isAdmin: isAdminUser };
+            currentUser = {
+                ...currentUser,
+                ...userData,
+                email: correctEmail || userData.email,
+                isAdmin: isAdminUser
+            };
 
             // 최초 로드 시에만 실행할 로직 (UI 초기화, 비정상 종료 복구 등)
             if (!initialLoadComplete) {
@@ -2493,7 +2457,9 @@ async function loadUserData(user) {
 
                 console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
                 isLoggedIn = true;
-                document.getElementById('scene-auth').classList.add('hidden');
+                const authScene = document.getElementById('scene-auth');
+                if (authScene) authScene.classList.add('hidden');
+
                 roomFetchPromise = null;
                 fetchRaceRooms(false);
                 fetchMyRooms();
@@ -2508,7 +2474,8 @@ async function loadUserData(user) {
             }
         }, (error) => {
             console.error("❌ 유저 데이터 실시간 수신 실패:", error);
-            alert("유저 정보를 실시간으로 동기화하는 중 오류가 발생했습니다.");
+            // 권한 오류 시 알림을 띄우지 않고 로깅만 합니다. (로그아웃 중 발생할 수 있음)
+            // alert("유저 정보를 실시간으로 동기화하는 중 오류가 발생했습니다.");
         });
     } catch (error) {
         console.error("❌ 유저 데이터 초기 로딩/생성 실패:", error);
@@ -2524,7 +2491,7 @@ function loginWithKakao() {
     // [FIX] 카카오 로그인 시 닉네임과 이메일 정보만 명시적으로 요청합니다. (프로필 사진 제외)
     provider.addScope('profile_nickname');
     provider.addScope('account_email');
-    
+
     // signInWithPopup을 호출하면 onAuthStateChanged 리스너가 로그인 결과를 자동으로 감지합니다.
     firebase.auth().signInWithPopup(provider).catch((error) => {
         console.error("❌ 카카오 로그인 팝업 실패:", error.message);
@@ -2540,7 +2507,7 @@ function loginWithKakao() {
  */
 function loginWithFacebook() {
     const provider = new firebase.auth.FacebookAuthProvider();
-    
+
     // 이메일과 공개 프로필 권한을 요청합니다.
     provider.addScope('email');
     provider.addScope('public_profile');
@@ -2567,14 +2534,14 @@ function loginWithFacebook() {
 function loginWithNaver() {
     // 1. 네이버 클라이언트 ID 
     const clientId = "YNgZCcwBzPp11G9wKmHS";
-    
+
     // 2. 현재 게임이 실행 중인 주소 (이 주소로 팝업이 다시 돌아옵니다)
     const redirectUri = encodeURIComponent("https://orangecases.github.io/chicken-race/");
     const state = Math.random().toString(36).substr(2, 11);
 
     // 3. 네이버 로그인 팝업 띄우기
     const url = `https://nid.naver.com/oauth2.0/authorize?response_type=token&client_id=${clientId}&redirect_uri=${redirectUri}&state=${state}`;
-    
+
     // 혹시 몰라 콘솔에 찍어보는 디버깅 코드
     console.log("🚀 최종 전송 URL:", url);
 
@@ -2593,14 +2560,14 @@ function loginWithNaver() {
                 // 방금 배포한 클라우드 함수 호출!
                 const loginFunction = firebase.functions().httpsCallable('naverLogin');
                 const result = await loginFunction({ accessToken: accessToken });
-                
+
                 // 백엔드가 안전하게 만들어준 커스텀 토큰 받기
                 const customToken = result.data.customToken;
 
                 // Firebase에 최종 로그인 처리!
                 await firebase.auth().signInWithCustomToken(customToken);
                 console.log("✅ 네이버 로그인(커스텀 토큰) 완벽 성공!");
-                
+
             } catch (error) {
                 console.error("❌ 백엔드 인증 처리 중 오류:", error);
                 alert("네이버 로그인 처리 중 오류가 발생했습니다.");
@@ -2661,7 +2628,7 @@ document.addEventListener('DOMContentLoaded', () => {
             isLoggedIn = false;
             currentUser = null;
             console.log("❓ 로그아웃 상태");
-            
+
             // UI 업데이트
             updateCoinUI(); // 게스트 코인으로 UI 업데이트
             // [FIX] F5 새로고침 또는 탭 전환 시 목록이 사라지는 문제를 해결합니다.
@@ -2671,7 +2638,7 @@ document.addEventListener('DOMContentLoaded', () => {
             roomFetchPromise = null; // [신규] 권한 변경 반영을 위해 목록 재로딩
             fetchRaceRooms(false);
             fetchMyRooms(); // [신규] 내 방 목록도 갱신 (비움)
-            
+
             // 열려있을 수 있는 프로필 모달 닫기
             const sceneUserProfile = document.getElementById('scene-user-profile');
             if (sceneUserProfile) sceneUserProfile.classList.add('hidden');
@@ -2704,7 +2671,7 @@ document.addEventListener('DOMContentLoaded', () => {
             fetchMyRooms();
         };
     }
-    
+
     // [신규] 디버깅용 봇 추가/삭제 이벤트 핸들러 (이벤트 위임)
     // [수정] 서버 연동에 따라 Firestore 데이터를 직접 수정하도록 변경
     const handleDebugBotAction = async (e) => {
@@ -2731,7 +2698,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const roomDoc = await transaction.get(roomRef);
                     if (!roomDoc.exists) throw "존재하지 않는 방입니다.";
                     const roomData = roomDoc.data();
-                    
+
                     if (roomData.currentPlayers >= roomData.maxPlayers) {
                         console.warn(`[Debug] 방 [${roomId}]이(가) 가득 찼습니다.`);
                         return; // 트랜잭션 중단
@@ -2791,9 +2758,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             }
-            
+
             console.log(`[Debug] 방 [${roomId}]의 참가자 정보를 성공적으로 수정했습니다.`);
-            
+
             // 트랜잭션 성공 후, 로비에 있다면 목록을 수동으로 갱신합니다.
             // 게임 씬 내부에 있다면 onSnapshot 리스너가 UI를 자동으로 업데이트합니다.
             const isInGame = !document.getElementById('scene-game').classList.contains('hidden');
@@ -2936,7 +2903,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnProfileConfirm = document.getElementById('btn-profile-confirm');
     const btnLogout = document.getElementById('btn-logout');
     const btnRechargeCoin = document.getElementById('btn-recharge-coin'); // [신규] 코인 충전 버튼
-    
+
     if (btnCreateOpen) {
         btnCreateOpen.onclick = () => {
             // [신규] 방 만들기 로그인 체크
@@ -2955,7 +2922,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sceneCreateRoom.classList.remove('hidden');
         };
     }
-    if(btnCreateCancel) btnCreateCancel.onclick = () => sceneCreateRoom.classList.add('hidden');
+    if (btnCreateCancel) btnCreateCancel.onclick = () => sceneCreateRoom.classList.add('hidden');
 
     // [수정] 멤버 버튼 클릭 시 로그인 상태에 따라 다른 모달 표시
     if (btnMember) {
@@ -3087,7 +3054,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 2. 현재 유저의 '참가중인 방' 목록에 이 방을 추가합니다.
                 const newJoinedRoomEntry = { usedAttempts: 0, isPaid: false };
                 currentUser.joinedRooms[newRoomForGame.id] = newJoinedRoomEntry;
-                
+
                 // 3. [핵심 수정] 유저의 `joinedRooms` 필드만 Firestore에 직접 업데이트하여 영속성을 확보합니다.
                 //    `saveUserDataToFirestore()`를 호출하는 대신, `joinedRooms` 맵의 특정 필드만 업데이트합니다.
                 //    [FIX] joinedRooms 필드가 없을 경우를 대비해 set({ ... }, { merge: true })를 사용합니다.
@@ -3125,7 +3092,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const inputPw = document.getElementById('input-room-password').value;
             const msg = document.getElementById('password-message');
-            
+
             if (targetRoom && inputPw === targetRoom.password) {
                 unlockedRoomIds.push(targetRoom.id); // [신규] 해제된 방 ID 저장
                 scenePasswordInput.classList.add('hidden');
@@ -3182,7 +3149,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnResumeGame) btnResumeGame.onclick = togglePause;
 
     if (btnSingle) btnSingle.onclick = () => enterGameScene('single');
-    
+
     if (btnRaceStart) {
         btnRaceStart.onclick = () => {
             // [신규] 싱글 모드일 때만 시작 시 코인 차감 (1코인)
@@ -3200,7 +3167,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     alert("코인이 부족하여 게임을 시작할 수 없습니다.");
                     return;
                 }
-                
+
                 if (currentUser) {
                     currentUser.coins -= 1;
                     syncCoinsToServer(currentUser.coins);
@@ -3210,7 +3177,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 updateCoinUI();
             }
-            
+
             // [신규] 멀티 모드 시작 시 비용 지불 확인 (방 생성자 등 미지불 상태인 경우)
             if (currentGameMode === 'multi' && currentRoom && currentUser) {
                 const userRoomState = currentUser.joinedRooms[currentRoom.id];
@@ -3228,14 +3195,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            clearAutoActionTimer(); 
+            clearAutoActionTimer();
             document.getElementById('game-start-screen').classList.add('hidden');
             setControlsVisibility(true); // [수정] 게임 시작 시 컨트롤러 표시
             // 0.5초 애니메이션 간격 후 게임 시작
             setTimeout(() => {
                 // [수정] 루프를 새로 시작하는 대신 상태를 변경하여 게임 진행
                 if (gameLoopId) cancelAnimationFrame(gameLoopId);
-                
+
                 // [3단계] 게임 시작 시 내 상태를 'playing'으로 서버에 업데이트
                 if (currentGameMode === 'multi' && currentUser) {
                     const myId = currentUser.id;
@@ -3247,7 +3214,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
                 playSound('start');
-                playSound('bgm'); 
+                playSound('bgm');
                 gameState = STATE.PLAYING; // [FIX] 게임 상태를 'PLAYING'으로 변경하여 게임 로직 실행
                 gameLoop();
             }, 500);
@@ -3271,7 +3238,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     alert("코인이 부족하여 게임을 시작할 수 없습니다.");
                     return;
                 }
-                
+
                 if (currentUser) {
                     currentUser.coins -= 1;
                     syncCoinsToServer(currentUser.coins);
@@ -3301,7 +3268,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
                 playSound('start');
-                playSound('bgm'); 
+                playSound('bgm');
                 gameState = STATE.PLAYING; // [핵심] 상태를 PLAYING으로 변경하여 게임 시작
                 gameLoop();
             }, 500);
@@ -3346,7 +3313,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchRaceRooms(false); // [FIX] 탭 전환 시 서버 데이터 갱신
         fetchMyRooms();        // [신규] 내 방 목록 갱신
     });
-    
+
     // [수정] Top 100 탭 클릭 시 서버에서 랭킹 불러오기
     initTabs('tab-my-record', 'tab-top-100', 'content-my-record', 'content-top-100', () => {
         const tabTop100 = document.getElementById('tab-top-100');
@@ -3359,7 +3326,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.list-tabgroup .refresh').forEach(btn => {
         btn.onclick = (e) => {
             e.stopPropagation(); // 부모인 탭의 클릭 이벤트가 전파되는 것을 막습니다.
-            
+
             // [FIX] 새로고침 버튼이 동작하지 않는 문제 해결
             // 원인: 1. 중복 호출 방지 로직 때문에 새로고침이 무시됨. 2. '참가중' 목록 갱신 로직 누락.
             // 해결: 1. 기존 Promise를 초기화하여 강제로 목록을 다시 불러오도록 수정.
@@ -3378,4 +3345,116 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // [신규] 방 삭제 버튼
     if (btnDeleteRoom) {
-    
+        btnDeleteRoom.onclick = () => {
+            if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.remove('hidden');
+        };
+    }
+
+    // 점프/부스트 컨트롤
+    const btnJump = document.getElementById('btn-jump');
+    if (btnJump) {
+        const startJumping = (e) => {
+            e.preventDefault();
+            if (gameState === STATE.PLAYING) {
+                btnJump.classList.add('pressed');
+                isJumpPressed = true; // 누름 상태 유지
+                if (!chicken.isJumping) chicken.jump(); // 즉시 점프 시도
+            }
+        };
+        const endJumping = (e) => {
+            e.preventDefault();
+            btnJump.classList.remove('pressed');
+            isJumpPressed = false; // 누름 상태 해제
+            if (gameState === STATE.PLAYING) {
+                chicken.cutJump();
+            }
+        };
+        // [수정] addEventListener 방식으로 변경하여 터치 반응성 개선
+        btnJump.addEventListener('mousedown', startJumping);
+        btnJump.addEventListener('mouseup', endJumping);
+        btnJump.addEventListener('mouseleave', endJumping);
+        btnJump.addEventListener('touchstart', startJumping, { passive: false });
+        btnJump.addEventListener('touchend', endJumping);
+        btnJump.addEventListener('touchcancel', endJumping);
+    }
+    const btnBoost = document.getElementById('btn-boost');
+    if (btnBoost) {
+        const startBoosting = (e) => {
+            e.preventDefault();
+            if (gameState === STATE.PLAYING) {
+                btnBoost.classList.add('pressed');
+                chicken.isBoosting = true;
+            }
+        };
+        const endBoosting = (e) => {
+            e.preventDefault();
+            btnBoost.classList.remove('pressed');
+            chicken.isBoosting = false;
+        };
+        // [수정] addEventListener 방식으로 변경하여 터치 반응성 개선
+        btnBoost.addEventListener('mousedown', startBoosting);
+        btnBoost.addEventListener('mouseup', endBoosting);
+        btnBoost.addEventListener('mouseleave', endBoosting);
+        btnBoost.addEventListener('touchstart', startBoosting, { passive: false });
+        btnBoost.addEventListener('touchend', endBoosting);
+        btnBoost.addEventListener('touchcancel', endBoosting);
+    }
+
+    // [수정] 모달 내 range input 값 표시 및 프로그레스 바 업데이트
+    const setupRangeInput = (rangeId, displayId) => {
+        const rangeInput = document.getElementById(rangeId);
+        if (!rangeInput) return;
+
+        const update = () => {
+            // 1. 텍스트 값 업데이트
+            const displayEl = document.getElementById(displayId);
+            if (displayEl) displayEl.innerText = rangeInput.value;
+            
+            // [신규] 시도 횟수 슬라이더 변경 시 차감 코인 표시 업데이트
+            const displayCost = document.getElementById('display-cost');
+            if (rangeId === 'input-room-attempts' && displayCost) displayCost.innerText = rangeInput.value;
+
+            // 2. CSS 변수를 이용한 프로그레스 바 업데이트
+            const min = parseFloat(rangeInput.min) || 0;
+            const max = parseFloat(rangeInput.max) || 100;
+            const value = parseFloat(rangeInput.value);
+            const percent = ((value - min) / (max - min)) * 100;
+            rangeInput.style.setProperty('--progress-percent', `${percent}%`);
+        };
+
+        rangeInput.addEventListener('input', update);
+        update(); // 초기 로드 시 한 번 실행하여 현재 값으로 프로그레스 바를 채웁니다.
+    };
+    setupRangeInput('input-room-limit', 'display-limit');
+    setupRangeInput('input-room-attempts', 'display-attempts');
+
+    // [신규] 순위 결정 방식 토글 버튼 이벤트
+    document.querySelectorAll('#group-rank-type button').forEach(btn => {
+        btn.onclick = () => {
+            // 먼저 모든 버튼에서 active 클래스 제거
+            document.querySelectorAll('#group-rank-type button').forEach(b => b.classList.remove('active'));
+            // 클릭된 버튼에만 active 클래스 추가
+            btn.classList.add('active');
+        };
+    });
+
+    // 키보드 점프 (누르는 시간에 따라 높이 조절)
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && gameState === STATE.PLAYING) {
+            e.preventDefault(); 
+            if (!isJumpPressed) { // [신규] 처음 눌렀을 때만 실행
+                isJumpPressed = true;
+                if (!chicken.isJumping) chicken.jump();
+            }
+        }
+    });
+    window.addEventListener('keyup', (e) => {
+        if (e.code === 'Space' && gameState === STATE.PLAYING) {
+            e.preventDefault(); isJumpPressed = false; chicken.cutJump();
+        }
+    });
+
+    // [개발용] 콘솔에서 초기화 함수를 쉽게 호출할 수 있도록 window 객체에 할당
+    window.resetAdCount = resetAdCount;
+    window.resetRoomData = resetRoomData;
+});
