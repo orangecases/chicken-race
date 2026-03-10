@@ -2384,114 +2384,83 @@ function loginWithGoogle() {
  * [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
  * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현 및 비정상 종료 복구 (F5 등)
  */
-async function loadUserData(user) {
+function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
 
     if (unsubscribeUserData) {
         unsubscribeUserData();
         unsubscribeUserData = null;
     }
-
-    try {
+ 
+    // [수정] 클라이언트에서 문서를 직접 생성하는 대신,
+    // 백엔드(Cloud Function)에서 생성된 문서를 실시간으로 구독(listen)하는 방식으로 변경합니다.
+    // 이 방식은 권한 문제를 원천적으로 해결하며 더 안전합니다.
+    let initialLoadComplete = false;
+ 
+    unsubscribeUserData = userRef.onSnapshot((snapshot) => {
+        // 백엔드에서 문서 생성이 지연될 수 있으므로, 문서가 아직 없으면 기다립니다.
+        if (!snapshot.exists) {
+            console.log("사용자 프로필을 기다리는 중...");
+            return;
+        }
+ 
+        const userData = snapshot.data();
         const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
         const correctEmail = user.email || (providerInfo ? providerInfo.email : null);
         const isAdminUser = ADMIN_UIDS.includes(user.uid);
-        const extractedNickname = (providerInfo ? providerInfo.displayName : null) || user.displayName;
-        let providerSuffix = "";
-
-        if (providerInfo) {
-            const providerId = providerInfo.providerId;
-            if (providerId.includes('kakao')) providerSuffix = " (Kakao)";
-            else if (providerId.includes('google')) providerSuffix = " (Google)";
-            else if (providerId.includes('naver')) providerSuffix = " (Naver)";
-        }
-
-        const finalNickname = (extractedNickname || '이름없음') + providerSuffix;
-
-        const initialUserData = {
-            id: user.uid,
-            email: correctEmail,
-            nickname: finalNickname,
-            coins: 10,
-            badges: { '1': 0, '2': 0, '3': 0 },
-            joinedRooms: {}
+ 
+        // currentUser 객체 설정/업데이트
+        currentUser = {
+            ...currentUser,
+            ...userData,
+            email: correctEmail || userData.email,
+            isAdmin: isAdminUser
         };
-
-        // set({ merge: true })는 문서가 없으면 생성하고, 있으면 필드를 병합합니다.
-        // [FIX] 권한 문제로 실패하더라도 읽기 시도를 계속하도록 예외 처리
-        try {
-            await userRef.set(initialUserData, { merge: true });
-            console.log("✅ User document ensured on client-side.");
-        } catch (e) {
-            console.warn("⚠️ 유저 문서 생성 실패 (권한 부족 등):", e);
-        }
-
-        let initialLoadComplete = false;
-
-        // 문서가 확실히 존재하므로, 실시간 리스너를 안전하게 부착합니다.
-        unsubscribeUserData = userRef.onSnapshot((snapshot) => {
-            if (!snapshot.exists) {
-                console.error("FATAL: User document does not exist after set-merge.");
-                return;
+ 
+        // 최초 로드 시에만 실행할 로직 (UI 초기화, 비정상 종료 복구 등)
+        if (!initialLoadComplete) {
+            initialLoadComplete = true;
+ 
+            // Auth 정보와 Firestore 정보가 다를 경우 동기화
+            if (correctEmail && userData.email !== correctEmail) {
+                userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
             }
-
-            const userData = snapshot.data();
-
-            // currentUser 객체 설정/업데이트
-            currentUser = {
-                ...currentUser,
-                ...userData,
-                email: correctEmail || userData.email,
-                isAdmin: isAdminUser
-            };
-
-            // 최초 로드 시에만 실행할 로직 (UI 초기화, 비정상 종료 복구 등)
-            if (!initialLoadComplete) {
-                initialLoadComplete = true;
-
-                if (correctEmail && userData.email !== correctEmail) {
-                    userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
+ 
+            const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
+            if (lastActiveRoomId) {
+                sessionStorage.removeItem('activeRoomId');
+                if (lastActiveRoomId === 'single_player_mode') {
+                    console.log('⚠️ 비정상 종료 감지: 싱글 플레이 게임을 종료 처리했습니다.');
+                } else {
+                    console.log(`⚠️ 비정상 종료 감지: 방 [${lastActiveRoomId}]에서 퇴장 처리를 시작합니다.`);
+                    const userRoomState = userData.joinedRooms ? userData.joinedRooms[lastActiveRoomId] : null;
+                    const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
+                    performServerExit(lastActiveRoomId, !hasStartedPlaying);
                 }
-
-                const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
-                if (lastActiveRoomId) {
-                    sessionStorage.removeItem('activeRoomId');
-                    if (lastActiveRoomId === 'single_player_mode') {
-                        console.log('⚠️ 비정상 종료 감지: 싱글 플레이 게임을 종료 처리했습니다.');
-                    } else {
-                        console.log(`⚠️ 비정상 종료 감지: 방 [${lastActiveRoomId}]에서 퇴장 처리를 시작합니다.`);
-                        const userRoomState = userData.joinedRooms ? userData.joinedRooms[lastActiveRoomId] : null;
-                        const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
-                        performServerExit(lastActiveRoomId, !hasStartedPlaying);
-                    }
-                }
-
-                console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
-                isLoggedIn = true;
-                const authScene = document.getElementById('scene-auth');
-                if (authScene) authScene.classList.add('hidden');
-
-                roomFetchPromise = null;
-                fetchRaceRooms(false);
-                fetchMyRooms();
             }
-
-            // 데이터 변경 시마다 항상 실행할 UI 업데이트
-            updateCoinUI();
+ 
+            console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
+            isLoggedIn = true;
+            const authScene = document.getElementById('scene-auth');
+            if (authScene) authScene.classList.add('hidden');
+ 
+            roomFetchPromise = null;
+            fetchRaceRooms(false);
             fetchMyRooms();
-            const sceneUserProfile = document.getElementById('scene-user-profile');
-            if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
-                showUserProfile();
-            }
-        }, (error) => {
-            console.error("❌ 유저 데이터 실시간 수신 실패:", error);
-            // 권한 오류 시 알림을 띄우지 않고 로깅만 합니다. (로그아웃 중 발생할 수 있음)
-            // alert("유저 정보를 실시간으로 동기화하는 중 오류가 발생했습니다.");
-        });
-    } catch (error) {
-        console.error("❌ 유저 데이터 초기 로딩/생성 실패:", error);
-        // alert("유저 정보를 불러오는 중 오류가 발생했습니다.");
-    }
+        }
+ 
+        // 데이터 변경 시마다 항상 실행할 UI 업데이트
+        updateCoinUI();
+        fetchMyRooms();
+        const sceneUserProfile = document.getElementById('scene-user-profile');
+        if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
+            showUserProfile();
+        }
+    }, (error) => {
+        console.error("❌ 유저 데이터 실시간 수신 실패:", error);
+        // 권한 오류 시 알림을 띄우지 않고 로깅만 합니다. (로그아웃 중 발생할 수 있음)
+        alert("유저 정보를 실시간으로 동기화하는 중 오류가 발생했습니다.");
+    });
 }
 
 /**

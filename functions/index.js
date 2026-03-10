@@ -74,3 +74,40 @@ exports.naverLogin = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', error.message);
     }
 });
+
+/**
+ * [신규] Firebase Auth에 새로운 사용자가 생성될 때마다 Firestore에 해당 사용자 문서를 자동으로 생성합니다.
+ * 이 함수는 구글, 카카오, 페이스북 등 모든 신규 가입 시 트리거됩니다.
+ */
+exports.createUserDocument = functions.auth.user().onCreate(async (user) => {
+    const { uid, email, displayName, providerData } = user;
+    console.log(`새로운 사용자 생성됨: ${uid}, Email: ${email}`);
+
+    const userRef = admin.firestore().collection('users').doc(uid);
+
+    // 소셜 로그인 제공자 정보에서 닉네임 포맷팅
+    const providerInfo = providerData && providerData[0] ? providerData[0] : null;
+    const extractedNickname = displayName || (providerInfo ? providerInfo.displayName : null);
+    let providerSuffix = "";
+    if (providerInfo) {
+        const providerId = providerInfo.providerId;
+        if (providerId.includes('kakao')) providerSuffix = " (Kakao)";
+        else if (providerId.includes('google')) providerSuffix = " (Google)";
+        else if (providerId.includes('naver')) providerSuffix = " (Naver)";
+    }
+    const finalNickname = (extractedNickname || '이름없음') + providerSuffix;
+
+    const initialUserData = {
+        id: uid,
+        email: email || '',
+        nickname: finalNickname,
+        coins: 10,
+        badges: { '1': 0, '2': 0, '3': 0 },
+        joinedRooms: {},
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    return userRef.set(initialUserData)
+        .then(() => console.log(`✅ Firestore에 사용자 문서 생성 완료: ${uid}`))
+        .catch(error => console.error(`❌ Firestore 사용자 문서 생성 실패: ${uid}`, error));
+});
