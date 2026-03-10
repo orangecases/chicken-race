@@ -2373,7 +2373,7 @@ function loginWithGoogle() {
  * [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
  * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현
  */
-async function loadUserData(user) {
+function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
     
     // 기존 리스너가 있다면 해제
@@ -2382,118 +2382,108 @@ async function loadUserData(user) {
         unsubscribeUserData = null;
     }
 
-    try {
-        // 1. 먼저 문서를 한 번 가져와서 존재 여부를 확인하고 초기 데이터를 설정합니다.
-        let doc = await userRef.get();
-        let isNewUser = false;
+    // [수정] get() 호출 시 발생하는 권한 오류를 회피하기 위해, onSnapshot 리스너 내부에서 모든 로직을 처리하도록 구조를 변경합니다.
+    // 이 방식은 Firestore의 실시간 업데이트 기능을 활용하여 데이터 존재 여부를 확인하고 신규 유저를 생성합니다.
+    let initialLoadComplete = false; // 첫 데이터 로드 및 일회성 로직 실행 여부를 추적하는 플래그
 
-        // 2. 문서가 없으면 신규 유저이므로 문서를 생성합니다.
-        if (!doc.exists) {
-            isNewUser = true;
-            console.log("✨ 신규 유저입니다. Firestore에 문서를 생성합니다.");
+    unsubscribeUserData = userRef.onSnapshot(async (doc) => {
+        try {
+            // 1. 문서가 없으면 신규 유저이므로 문서를 생성합니다.
+            if (!doc.exists) {
+                // 이미 생성 로직이 진행 중이거나 완료된 경우, 중복 생성을 방지하기 위해 여기서 멈춥니다.
+                if (initialLoadComplete) return;
 
-            const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
-            const extractedEmail = user.email || (providerInfo ? providerInfo.email : null);
-            const extractedNickname = (providerInfo ? providerInfo.displayName : null) || user.displayName;
-            
-            let providerSuffix = "";
-            if (providerInfo) {
-                const providerId = providerInfo.providerId;
-                if (providerId === 'oidc.kakao') providerSuffix = " (Kakao)";
-                else if (providerId === 'google.com') providerSuffix = " (Google)";
-                else if (providerId === 'oidc.naver') providerSuffix = " (Naver)";
-            }
-
-            const newUserData = {
-                id: user.uid,
-                email: extractedEmail,
-                nickname: (extractedNickname || '이름없음') + providerSuffix,
-                coins: 10,
-                badges: { '1': 0, '2': 0, '3': 0 },
-                joinedRooms: {}
-            };
-            
-            await userRef.set(newUserData);
-            doc = await userRef.get(); // 생성 후 데이터를 다시 읽어옵니다.
-        }
-
-        const userData = doc.data();
-
-        // 3. 초기 currentUser 객체를 설정합니다.
-        const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
-        const correctEmail = user.email || (providerInfo ? providerInfo.email : null);
-        const isAdminUser = ADMIN_UIDS.includes(user.uid);
-
-        currentUser = {
-            ...userData,
-            email: correctEmail || userData.email,
-            joinedRooms: userData.joinedRooms || {},
-            badges: userData.badges || { '1': 0, '2': 0, '3': 0 },
-            coins: userData.coins !== undefined ? userData.coins : 10,
-            isAdmin: isAdminUser
-        };
-
-        // 이메일 정보가 인증 정보와 다를 경우 업데이트 (자가 치유)
-        if (correctEmail && userData.email !== correctEmail) {
-            userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
-        }
-
-        // 4. 비정상 종료 복구 로직을 '최초 1회'만 실행합니다.
-        if (!isNewUser) {
-            const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
-            if (lastActiveRoomId) {
-                sessionStorage.removeItem('activeRoomId');
+                console.log("✨ 신규 유저입니다. Firestore에 문서를 생성합니다.");
+                const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
+                const extractedEmail = user.email || (providerInfo ? providerInfo.email : null);
+                const extractedNickname = (providerInfo ? providerInfo.displayName : null) || user.displayName;
                 
-                if (lastActiveRoomId === 'single_player_mode') {
-                    console.log('⚠️ 비정상 종료 감지: 싱글 플레이 게임을 종료 처리했습니다.');
-                } else {
-                    console.log(`⚠️ 비정상 종료 감지: 방 [${lastActiveRoomId}]에서 퇴장 처리를 시작합니다.`);
-                    const userRoomState = currentUser.joinedRooms ? currentUser.joinedRooms[lastActiveRoomId] : null;
-                    const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
-                    performServerExit(lastActiveRoomId, !hasStartedPlaying);
+                let providerSuffix = "";
+                if (providerInfo) {
+                    const providerId = providerInfo.providerId;
+                    if (providerId === 'oidc.kakao') providerSuffix = " (Kakao)";
+                    else if (providerId === 'google.com') providerSuffix = " (Google)";
+                    else if (providerId === 'oidc.naver') providerSuffix = " (Naver)";
                 }
-            }
-        }
-
-        // 5. 이제 실시간 업데이트를 위한 onSnapshot 리스너를 부착합니다.
-        unsubscribeUserData = userRef.onSnapshot((snapshot) => {
-            if (!snapshot.exists) {
-                console.warn("유저 문서가 실시간 업데이트 중 삭제되었습니다. 로그아웃 처리합니다.");
-                firebase.auth().signOut();
+    
+                const newUserData = {
+                    id: user.uid,
+                    email: extractedEmail,
+                    nickname: (extractedNickname || '이름없음') + providerSuffix,
+                    coins: 10,
+                    badges: { '1': 0, '2': 0, '3': 0 },
+                    joinedRooms: {}
+                };
+                
+                await userRef.set(newUserData);
+                // set()이 성공하면 이 onSnapshot 리스너가 다시 호출되므로, 여기서 함수를 종료합니다.
                 return;
             }
-            const updatedUserData = snapshot.data();
-            
-            currentUser = { ...currentUser, ...updatedUserData,
-                joinedRooms: updatedUserData.joinedRooms || {},
-                badges: updatedUserData.badges || { '1': 0, '2': 0, '3': 0 },
+
+            // 2. 문서가 존재하면 데이터를 처리합니다.
+            const userData = doc.data();
+    
+            // 3. currentUser 객체를 설정/업데이트합니다.
+            const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
+            const correctEmail = user.email || (providerInfo ? providerInfo.email : null);
+            const isAdminUser = ADMIN_UIDS.includes(user.uid);
+    
+            currentUser = {
+                ...currentUser, // 이전 상태 유지 (특히 isAdmin 등)
+                ...userData,
+                email: correctEmail || userData.email,
+                isAdmin: isAdminUser // 항상 최신 UID 기준으로 재확인
             };
-            
+
+            // 4. 첫 로드 시에만 실행할 로직 (비정상 종료 복구 등)
+            if (!initialLoadComplete) {
+                initialLoadComplete = true;
+
+                // 이메일 정보가 인증 정보와 다를 경우 업데이트 (자가 치유)
+                if (correctEmail && userData.email !== correctEmail) {
+                    userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
+                }
+
+                // 비정상 종료 복구 로직
+                const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
+                if (lastActiveRoomId) {
+                    sessionStorage.removeItem('activeRoomId');
+                    if (lastActiveRoomId === 'single_player_mode') {
+                        console.log('⚠️ 비정상 종료 감지: 싱글 플레이 게임을 종료 처리했습니다.');
+                    } else {
+                        console.log(`⚠️ 비정상 종료 감지: 방 [${lastActiveRoomId}]에서 퇴장 처리를 시작합니다.`);
+                        const userRoomState = currentUser.joinedRooms ? currentUser.joinedRooms[lastActiveRoomId] : null;
+                        const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
+                        performServerExit(lastActiveRoomId, !hasStartedPlaying);
+                    }
+                }
+
+                // 초기 UI 설정
+                console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
+                isLoggedIn = true;
+                document.getElementById('scene-auth').classList.add('hidden');
+                roomFetchPromise = null;
+                fetchRaceRooms(false);
+                fetchMyRooms();
+            }
+
+            // 5. 데이터가 변경될 때마다 항상 실행할 UI 업데이트
             updateCoinUI();
             fetchMyRooms();
             const sceneUserProfile = document.getElementById('scene-user-profile');
             if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
                 showUserProfile();
             }
+
+        } catch (error) {
+            console.error("❌ 유저 데이터 처리 중 오류:", error);
+            alert("유저 데이터를 처리하는 중 오류가 발생했습니다.");
+        }
         }, (error) => {
-            console.error("❌ 유저 데이터 실시간 수신 실패:", error);
+            // onSnapshot 자체에서 권한 오류가 발생할 경우
+            console.error("❌ 유저 데이터 로딩/수신 실패:", error);
             alert("유저 정보를 실시간으로 동기화하는 중 오류가 발생했습니다.");
         });
-
-        // 6. 모든 초기 설정이 끝난 후, 최종 UI를 업데이트합니다.
-        console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
-        isLoggedIn = true;
-
-        document.getElementById('scene-auth').classList.add('hidden');
-        updateCoinUI();
-        roomFetchPromise = null;
-        fetchRaceRooms(false);
-        fetchMyRooms();
-
-    } catch (error) {
-        console.error("❌ 유저 데이터 초기 로딩/생성 실패:", error);
-        alert("유저 데이터를 불러오는 중 오류가 발생했습니다.");
-    }
 }
 
 /**
