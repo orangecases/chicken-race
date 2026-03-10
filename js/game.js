@@ -2373,7 +2373,7 @@ function loginWithGoogle() {
  * [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
  * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현
  */
-async function loadUserData(user) { // [수정] async 키워드 유지
+async function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
     
     if (unsubscribeUserData) {
@@ -2382,64 +2382,69 @@ async function loadUserData(user) { // [수정] async 키워드 유지
     }
 
     try {
-        // [수정] '선 생성 요청 -> 후 확인 -> 최종 감시'의 3단계로 권한 오류를 원천 차단합니다.
+        // [수정] 'get -> set -> onSnapshot'의 안정적인 3단계 로직으로 권한 오류를 해결합니다.
 
-        // 1단계: 백엔드(Cloud Function)에 사용자 문서 생성을 요청합니다.
-        // 이 함수는 관리자 권한으로 실행되므로, 문서가 없으면 안전하게 생성합니다.
-        const ensureDoc = firebase.functions().httpsCallable('ensureUserDocument');
-        
-        const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
-        const extractedNickname = (providerInfo ? providerInfo.displayName : null) || user.displayName;
-        let providerSuffix = "";
-        if (providerInfo) {
-            const providerId = providerInfo.providerId;
-            if (providerId.includes('kakao')) providerSuffix = " (Kakao)";
-            else if (providerId.includes('google')) providerSuffix = " (Google)";
-            else if (providerId.includes('naver')) providerSuffix = " (Naver)";
-        }
-        const finalNickname = (extractedNickname || '이름없음') + providerSuffix;
+        // 1단계: 문서를 먼저 한 번 가져옵니다.
+        let doc = await userRef.get();
 
-        await ensureDoc({ nickname: finalNickname });
-        console.log("✅ User document ensured via Cloud Function.");
+        // 2단계: 문서가 없으면, 클라이언트에서 직접 생성합니다.
+        // Firestore 보안 규칙에서 신규 생성을 허용해야 합니다. (예: allow create: if request.auth.uid != null;)
+        if (!doc.exists) {
+            console.log("✨ 신규 유저입니다. Firestore에 문서를 생성합니다.");
+            const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
+            const extractedEmail = user.email || (providerInfo ? providerInfo.email : null);
+            const extractedNickname = (providerInfo ? providerInfo.displayName : null) || user.displayName;
+            let providerSuffix = "";
+            if (providerInfo) {
+                const providerId = providerInfo.providerId;
+                if (providerId.includes('kakao')) providerSuffix = " (Kakao)";
+                else if (providerId.includes('google')) providerSuffix = " (Google)";
+                else if (providerId.includes('naver')) providerSuffix = " (Naver)";
+            }
+            const finalNickname = (extractedNickname || '이름없음') + providerSuffix;
 
-        // 2단계: 문서가 실제로 생성되었는지 클라이언트에서 한 번 더 확인(get)합니다.
-        // 이 단계를 거치면 onSnapshot이 존재하지 않는 문서를 구독하려다 권한 오류를 내는 경우를 막을 수 있습니다.
-        const initialDoc = await userRef.get();
-        if (!initialDoc.exists) {
-            throw new Error("FATAL: User document not found even after Cloud Function call.");
+            const newUserData = {
+                id: user.uid,
+                email: extractedEmail,
+                nickname: finalNickname,
+                coins: 10,
+                badges: { '1': 0, '2': 0, '3': 0 },
+                joinedRooms: {}
+            };
+            await userRef.set(newUserData);
+            doc = await userRef.get(); // 생성 후 다시 읽어옵니다.
         }
 
         // 3단계: 문서 존재가 확인되었으므로, 안전하게 실시간 리스너(onSnapshot)를 부착합니다.
         let initialLoadComplete = false;
         unsubscribeUserData = userRef.onSnapshot((snapshot) => {
             if (!snapshot.exists) {
-                console.warn("User document was deleted. Signing out.");
+                console.warn("유저 문서가 삭제되었습니다. 로그아웃합니다.");
                 firebase.auth().signOut();
                 return;
             }
             const userData = snapshot.data();
 
+            // currentUser 객체 설정/업데이트
             const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
             const correctEmail = user.email || (providerInfo ? providerInfo.email : null);
             const isAdminUser = ADMIN_UIDS.includes(user.uid);
 
             currentUser = {
-                ...currentUser, // 이전 currentUser 상태를 유지하여 isAdmin 같은 속성이 사라지지 않도록 함
+                ...currentUser,
                 ...userData,
                 email: correctEmail || userData.email,
                 isAdmin: isAdminUser
             };
 
-            // 최초 로드 시에만 실행되는 로직 (UI 초기화, 비정상 종료 복구 등)
+            // 최초 로드 시에만 실행할 로직 (UI 초기화, 비정상 종료 복구 등)
             if (!initialLoadComplete) {
                 initialLoadComplete = true;
 
-                // 이메일 자가 치유 로직
                 if (correctEmail && userData.email !== correctEmail) {
                     userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
                 }
 
-                // 비정상 종료 복구 로직
                 const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
                 if (lastActiveRoomId) {
                     sessionStorage.removeItem('activeRoomId');
@@ -2447,13 +2452,12 @@ async function loadUserData(user) { // [수정] async 키워드 유지
                         console.log('⚠️ 비정상 종료 감지: 싱글 플레이 게임을 종료 처리했습니다.');
                     } else {
                         console.log(`⚠️ 비정상 종료 감지: 방 [${lastActiveRoomId}]에서 퇴장 처리를 시작합니다.`);
-                        const userRoomState = currentUser.joinedRooms ? currentUser.joinedRooms[lastActiveRoomId] : null;
+                         const userRoomState = userData.joinedRooms ? userData.joinedRooms[lastActiveRoomId] : null;
                         const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
                         performServerExit(lastActiveRoomId, !hasStartedPlaying);
                     }
                 }
 
-                // 초기 UI 렌더링
                 console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
                 isLoggedIn = true;
                 document.getElementById('scene-auth').classList.add('hidden');
@@ -2462,21 +2466,20 @@ async function loadUserData(user) { // [수정] async 키워드 유지
                 fetchMyRooms();
             }
 
-            // 데이터 변경 시마다 항상 실행되는 UI 업데이트
+            // 데이터 변경 시마다 항상 실행할 UI 업데이트
             updateCoinUI();
             fetchMyRooms();
             const sceneUserProfile = document.getElementById('scene-user-profile');
             if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
                 showUserProfile();
             }
-
         }, (error) => {
             console.error("❌ 유저 데이터 실시간 수신 실패:", error);
             alert("유저 정보를 실시간으로 동기화하는 중 오류가 발생했습니다.");
         });
 
     } catch (error) {
-        console.error("❌ 유저 데이터 초기 로딩/생성 확인 실패:", error);
+        console.error("❌ 유저 데이터 초기 로딩/생성 실패:", error);
         alert("유저 정보를 불러오는 중 오류가 발생했습니다.");
     }
 }
