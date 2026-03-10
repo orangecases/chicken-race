@@ -1448,8 +1448,14 @@ async function exitToLobby(isFullExit = false) { // [FIX] "완전 퇴장" 여부
     // [FIX] 방 퇴장 후 목록이 갱신되지 않는 문제 해결:
     // fetchRaceRooms가 캐시된 Promise를 반환하지 않고 강제로 새로고침하도록 Promise를 초기화합니다.
     roomFetchPromise = null;
-    await fetchRaceRooms(false);
-    fetchMyRooms();
+    
+    // [FIX] 데이터 로딩 실패가 화면 전환을 막지 않도록 예외 처리 추가
+    try {
+        await fetchRaceRooms(false);
+        fetchMyRooms();
+    } catch (e) {
+        console.warn("⚠️ 방 목록 갱신 실패 (무시하고 로비로 이동):", e);
+    }
 
     document.getElementById('scene-intro').classList.remove('hidden');
     document.getElementById('scene-game').classList.add('hidden');
@@ -2412,8 +2418,13 @@ async function loadUserData(user) {
         };
 
         // set({ merge: true })는 문서가 없으면 생성하고, 있으면 필드를 병합합니다.
-        await userRef.set(initialUserData, { merge: true });
-        console.log("✅ User document ensured on client-side.");
+        // [FIX] 권한 문제로 실패하더라도 읽기 시도를 계속하도록 예외 처리
+        try {
+            await userRef.set(initialUserData, { merge: true });
+            console.log("✅ User document ensured on client-side.");
+        } catch (e) {
+            console.warn("⚠️ 유저 문서 생성 실패 (권한 부족 등):", e);
+        }
 
         let initialLoadComplete = false;
 
@@ -2479,7 +2490,7 @@ async function loadUserData(user) {
         });
     } catch (error) {
         console.error("❌ 유저 데이터 초기 로딩/생성 실패:", error);
-        alert("유저 정보를 불러오는 중 오류가 발생했습니다.");
+        // alert("유저 정보를 불러오는 중 오류가 발생했습니다.");
     }
 }
 
