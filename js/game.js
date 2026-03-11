@@ -1237,6 +1237,10 @@ function fetchRaceRooms(loadMore = false) {
  * raceRooms(전체 목록)에 없는 오래된 방이라도 내가 참가 중이면 보여야 하기 때문입니다.
  */
 async function fetchMyRooms() {
+    // 1. 기존 '내 방' 리스너가 있다면 모두 해제합니다.
+    unsubscribeMyRoomsListeners.forEach(unsub => unsub());
+    unsubscribeMyRoomsListeners = [];
+
     if (!isLoggedIn || !currentUser || !currentUser.joinedRooms) {
         myRooms = [];
         renderRoomLists(true);
@@ -1249,28 +1253,45 @@ async function fetchMyRooms() {
         return;
     }
 
-    // [수정] currentMyRoomLimit 만큼 ID를 가져옵니다.
+    // 로컬 myRooms 배열을 서버 상태와 동기화하기 위해 일단 비웁니다.
+    myRooms = [];
     const targetIds = roomIds.slice(0, currentMyRoomLimit);
 
-    // Firestore 'in' 쿼리는 최대 10개 제한이 있으므로, 10개씩 끊어서 요청합니다.
-    const chunks = [];
-    for (let i = 0; i < targetIds.length; i += 10) {
-        chunks.push(targetIds.slice(i, i + 10));
-    }
+    // 각 방에 대해 개별적으로 실시간 리스너를 설정합니다.
+    targetIds.forEach(roomId => {
+        const unsub = db.collection('rooms').doc(roomId)
+            .onSnapshot(doc => {
+                const index = myRooms.findIndex(r => r.id === roomId);
 
-    try {
-        const promises = chunks.map(chunk => db.collection('rooms').where(firebase.firestore.FieldPath.documentId(), 'in', chunk).get());
-        const snapshots = await Promise.all(promises);
-        
-        myRooms = [];
-        snapshots.forEach(snap => {
-            snap.docs.forEach(doc => myRooms.push(mapFirestoreDocToRoom(doc)));
-        });
-        
-        renderRoomLists(true);
-    } catch (e) {
-        console.error("❌ 내 방 목록 로드 실패:", e);
-    }
+                if (doc.exists) {
+                    const roomData = mapFirestoreDocToRoom(doc);
+                    if (index > -1) {
+                        // 기존 방 정보 업데이트
+                        Object.assign(myRooms[index], roomData);
+                    } else {
+                        // 새 방 추가
+                        myRooms.push(roomData);
+                    }
+                } else {
+                    // 방이 DB에서 삭제된 경우, 로컬 배열에서도 제거
+                    if (index > -1) {
+                        myRooms.splice(index, 1);
+                    }
+                }
+                // createdAt으로 정렬하여 최신 방이 위로 오게 함
+                myRooms.sort((a, b) => {
+                    const timeA = a.createdAt?.toMillis() || 0;
+                    const timeB = b.createdAt?.toMillis() || 0;
+                    return timeB - timeA;
+                });
+                renderRoomLists(true); // 스냅샷을 갱신하며 렌더링
+            }, error => {
+                console.error(`❌ 내 방 [${roomId}] 실시간 수신 오류:`, error);
+            });
+
+        // 생성된 리스너의 해제 함수를 배열에 저장해 관리합니다.
+        unsubscribeMyRoomsListeners.push(unsub);
+    });
 }
 
 /**
