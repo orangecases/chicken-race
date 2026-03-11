@@ -3318,9 +3318,12 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     // [수정] 레이스룸/참가중 탭 전환 시에는 renderRoomLists 함수를 콜백으로 전달하여 목록을 새로고침합니다.
     initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', () => {
-        renderRoomLists(true);
-        fetchRaceRooms(false); // [FIX] 탭 전환 시 서버 데이터 갱신
-        fetchMyRooms();        // [신규] 내 방 목록 갱신
+        // [수정] 탭 전환 시에도 새로고침과 동일하게 동작하도록 Promise를 초기화하고 데이터를 다시 불러옵니다.
+        // 이렇게 하면 캐시를 무시하고 항상 최신 데이터를 가져옵니다.
+        console.log("🔄️ 탭 전환으로 목록을 새로고침합니다.");
+        roomFetchPromise = null;
+        fetchRaceRooms(false);
+        fetchMyRooms();
     });
 
     // [수정] Top 100 탭 클릭 시 서버에서 랭킹 불러오기
