@@ -2989,40 +2989,42 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             try {
-                // [FIX] 방 생성 로직을 Batch Write로 변경하여 원자성을 보장합니다.
-                // 방 생성, 생성자 등록, 초기 봇 등록을 한 번의 작업으로 처리합니다.
-                const batch = db.batch();
                 const roomRef = db.collection("rooms").doc(); // 새 문서 ID 미리 생성
 
-                // 1. 방 정보 설정
+                // 1단계: 방 문서와 생성자 본인의 참가자 문서를 먼저 생성합니다.
                 const roomData = {
                     title: titleInput || "즐거운 레이스",
                     password: passwordInput.length > 0 ? passwordInput : null,
                     maxPlayers: parseInt(limitInput) || 5,
-                    currentPlayers: 2, // 나 + 봇
+                    currentPlayers: 1, // 우선 생성자 1명으로 시작
                     creatorUid: user.uid,
                     attempts: attempts,
                     rankType: rankType,
                     status: "inprogress",
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 };
-                batch.set(roomRef, roomData);
-
-                // 2. 생성자(나)를 참가자 목록에 추가
+                
+                const initialBatch = db.batch();
                 const creatorRef = roomRef.collection('participants').doc(user.uid);
                 const creatorData = { id: user.uid, name: currentUser.nickname, isBot: false, score: 0, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts };
-                batch.set(creatorRef, creatorData);
+                initialBatch.set(roomRef, roomData);
+                initialBatch.set(creatorRef, creatorData);
+                await initialBatch.commit();
+                console.log("✅ 1단계: 방 및 생성자 정보 생성 완료! ID:", roomRef.id);
 
-                // 3. 초기 봇 1명을 참가자 목록에 추가 (방 자동 폭파 방지)
+                // 2단계: 생성된 방에 봇을 추가하고, 방의 인원수를 1 증가시킵니다.
+                // (이제 방이 존재하므로, 수정된 보안 규칙이 방장 권한을 정상적으로 확인할 수 있습니다.)
+                const botBatch = db.batch();
                 const botRef = roomRef.collection('participants').doc(`bot_${Date.now()}`);
                 const botData = { id: botRef.id, name: '초보닭', isBot: true, score: 0, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts, startDelay: 60, targetScore: 750 }; // [수정] 봇 목표 점수 하향 조정
-                batch.set(botRef, botData);
+                botBatch.set(botRef, botData);
+                botBatch.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
+                await botBatch.commit();
+                console.log("✅ 2단계: 초기 봇 추가 완료!");
 
-                // 4. Batch 작업 실행
-                await batch.commit();
-                console.log("✅ 방 생성 및 초기 참가자 등록 완료! ID:", roomRef.id);
+                // 3. 로컬 데이터 업데이트 및 게임 씬 진입
+                roomData.currentPlayers = 2; // 봇이 추가되었으므로 로컬 데이터도 2로 맞춰줍니다.
 
-                // 5. 로컬 데이터 업데이트 및 게임 씬 진입
                 const newRoomForGame = mapFirestoreDocToRoom({ id: roomRef.id, data: () => roomData });
 
                 // [FIX] 방 생성 후 새로고침 시 방 목록이 사라지는 문제 및 '참가중' 목록에 방이 보이지 않는 문제 해결
