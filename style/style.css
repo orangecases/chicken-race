@@ -642,7 +642,7 @@ html, body small{font-size: 70%;}
 .score-list li .info p.score-display {
     font-size: 1.25rem;
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
     gap: 0.5rem;
 }
