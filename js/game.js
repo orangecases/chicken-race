@@ -1237,11 +1237,6 @@ function fetchRaceRooms(loadMore = false) {
  * raceRooms(전체 목록)에 없는 오래된 방이라도 내가 참가 중이면 보여야 하기 때문입니다.
  */
 async function fetchMyRooms() {
-    // [수정] 기존의 일회성 로직을 실시간 리스너 방식으로 변경합니다.
-    // 먼저, 이전 리스너가 있다면 모두 해제하여 중복 구독 및 메모리 누수를 방지합니다.
-    unsubscribeMyRoomsListeners.forEach(unsub => unsub());
-    unsubscribeMyRoomsListeners = [];
-
     if (!isLoggedIn || !currentUser || !currentUser.joinedRooms) {
         myRooms = [];
         renderRoomLists(true);
@@ -1257,46 +1252,25 @@ async function fetchMyRooms() {
     // [수정] currentMyRoomLimit 만큼 ID를 가져옵니다.
     const targetIds = roomIds.slice(0, currentMyRoomLimit);
 
-    // Firestore 'in' 쿼리는 최대 30개(구 10개) 제한이 있으므로, 10개씩 끊어서 요청합니다.
+    // Firestore 'in' 쿼리는 최대 10개 제한이 있으므로, 10개씩 끊어서 요청합니다.
     const chunks = [];
     for (let i = 0; i < targetIds.length; i += 10) {
         chunks.push(targetIds.slice(i, i + 10));
     }
 
-     // [수정] myRooms 배열을 초기화하고, 실시간 리스너를 통해 데이터를 채웁니다.
-    myRooms = [];
-
-    chunks.forEach(chunk => {
-        const unsub = db.collection('rooms').where(firebase.firestore.FieldPath.documentId(), 'in', chunk)
-            .onSnapshot(snapshot => {
-                snapshot.docChanges().forEach(change => {
-                    const changedRoom = mapFirestoreDocToRoom(change.doc);
-                    const index = myRooms.findIndex(r => r.id === changedRoom.id);
-
-                    if (change.type === 'removed') {
-                        if (index > -1) {
-                            myRooms.splice(index, 1);
-                        }
-                    } else { // 'added' 또는 'modified'
-                        if (index > -1) {
-                            // 방 정보가 업데이트되면(예: 인원 수 변경) 기존 데이터를 교체합니다.
-                            Object.assign(myRooms[index], changedRoom);
-                        } else {
-                            // 목록에 없던 새로운 방이 추가되면 배열에 추가합니다.
-                            myRooms.push(changedRoom);
-                        }
-                    }
-                });
-
-                // 변경 사항 처리 후, 목록 전체를 다시 렌더링하여 순서와 상태를 정확히 반영합니다.
-                renderRoomLists(true);
-            }, e => {
-                console.error("❌ 내 방 목록 실시간 수신 오류:", e);
-            });
-
-        // 생성된 리스너의 구독 해제 함수를 배열에 저장하여 나중에 정리할 수 있도록 합니다.
-        unsubscribeMyRoomsListeners.push(unsub);
-    });
+    try {
+        const promises = chunks.map(chunk => db.collection('rooms').where(firebase.firestore.FieldPath.documentId(), 'in', chunk).get());
+        const snapshots = await Promise.all(promises);
+        
+        myRooms = [];
+        snapshots.forEach(snap => {
+            snap.docs.forEach(doc => myRooms.push(mapFirestoreDocToRoom(doc)));
+        });
+        
+        renderRoomLists(true);
+    } catch (e) {
+        console.error("❌ 내 방 목록 로드 실패:", e);
+    }
 }
 
 /**
@@ -2412,82 +2386,97 @@ function loginWithGoogle() {
  * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현 및 비정상 종료 복구 (F5 등)
  */
 function loadUserData(user) {
+async function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
 
     if (unsubscribeUserData) {
         unsubscribeUserData();
         unsubscribeUserData = null;
     }
- 
-    // [수정] 클라이언트에서 문서를 직접 생성하는 대신,
-    // 백엔드(Cloud Function)에서 생성된 문서를 실시간으로 구독(listen)하는 방식으로 변경합니다.
-    // 이 방식은 권한 문제를 원천적으로 해결하며 더 안전합니다.
-    let initialLoadComplete = false;
- 
-    unsubscribeUserData = userRef.onSnapshot((snapshot) => {
-        // 백엔드에서 문서 생성이 지연될 수 있으므로, 문서가 아직 없으면 기다립니다.
-        if (!snapshot.exists) {
-            console.log("사용자 프로필을 기다리는 중...");
-            return;
-        }
- 
-        const userData = snapshot.data();
+
+    try {
+        // [FIX] 'set-then-listen' 패턴으로 신규 유저 생성 시 발생하는 권한 및 데이터 로딩 문제를 해결합니다.
+        // 1. 먼저 문서를 생성/업데이트하여 존재를 보장합니다.
         const providerInfo = user.providerData && user.providerData[0] ? user.providerData[0] : null;
-        const correctEmail = user.email || (providerInfo ? providerInfo.email : null);
-        const isAdminUser = ADMIN_UIDS.includes(user.uid);
- 
-        // currentUser 객체 설정/업데이트
-        currentUser = {
-            ...currentUser,
-            ...userData,
-            email: correctEmail || userData.email,
-            isAdmin: isAdminUser
+        const extractedEmail = user.email || (providerInfo ? providerInfo.email : null);
+        const extractedNickname = (providerInfo ? providerInfo.displayName : null) || user.displayName;
+        let providerSuffix = "";
+        if (providerInfo) {
+            const providerId = providerInfo.providerId;
+            if (providerId.includes('kakao')) providerSuffix = " (Kakao)";
+            else if (providerId.includes('google')) providerSuffix = " (Google)";
+            else if (providerId.includes('naver')) providerSuffix = " (Naver)";
+        }
+        const finalNickname = (extractedNickname || '이름없음') + providerSuffix;
+
+        const initialUserData = {
+            id: user.uid,
+            email: extractedEmail,
+            nickname: finalNickname,
+            coins: 10,
+            badges: { '1': 0, '2': 0, '3': 0 },
+            joinedRooms: {}
         };
- 
-        // 최초 로드 시에만 실행할 로직 (UI 초기화, 비정상 종료 복구 등)
-        if (!initialLoadComplete) {
-            initialLoadComplete = true;
- 
-            // Auth 정보와 Firestore 정보가 다를 경우 동기화
-            if (correctEmail && userData.email !== correctEmail) {
-                userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
+
+        // set({ merge: true })는 문서가 없으면 생성하고, 있으면 필드를 병합합니다.
+        await userRef.set(initialUserData, { merge: true });
+        console.log("✅ User document ensured on client-side.");
+
+        // 2. 이제 문서가 확실히 존재하므로, 실시간 리스너를 안전하게 부착합니다.
+        let initialLoadComplete = false;
+        unsubscribeUserData = userRef.onSnapshot((snapshot) => {
+            if (!snapshot.exists) {
+                console.error("FATAL: User document does not exist after set-merge.");
+                return;
             }
- 
-            const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
-            if (lastActiveRoomId) {
-                sessionStorage.removeItem('activeRoomId');
-                if (lastActiveRoomId === 'single_player_mode') {
-                    console.log('⚠️ 비정상 종료 감지: 싱글 플레이 게임을 종료 처리했습니다.');
-                } else {
-                    console.log(`⚠️ 비정상 종료 감지: 방 [${lastActiveRoomId}]에서 퇴장 처리를 시작합니다.`);
-                    const userRoomState = userData.joinedRooms ? userData.joinedRooms[lastActiveRoomId] : null;
-                    const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
-                    performServerExit(lastActiveRoomId, !hasStartedPlaying);
+
+            const userData = snapshot.data();
+            const correctEmail = user.email || (providerInfo ? providerInfo.email : null);
+            const isAdminUser = ADMIN_UIDS.includes(user.uid);
+
+            currentUser = { ...currentUser, ...userData, email: correctEmail || userData.email, isAdmin: isAdminUser };
+
+            if (!initialLoadComplete) {
+                initialLoadComplete = true;
+
+                if (correctEmail && userData.email !== correctEmail) {
+                    userRef.update({ email: correctEmail }).then(() => console.log("🔧 Firestore의 이메일 정보를 최신 정보로 수정했습니다."));
                 }
+
+                const lastActiveRoomId = sessionStorage.getItem('activeRoomId');
+                if (lastActiveRoomId) {
+                    sessionStorage.removeItem('activeRoomId');
+                    if (lastActiveRoomId === 'single_player_mode') {
+                        console.log('⚠️ 비정상 종료 감지: 싱글 플레이 게임을 종료 처리했습니다.');
+                    } else {
+                        console.log(`⚠️ 비정상 종료 감지: 방 [${lastActiveRoomId}]에서 퇴장 처리를 시작합니다.`);
+                        const userRoomState = userData.joinedRooms ? userData.joinedRooms[lastActiveRoomId] : null;
+                        const hasStartedPlaying = userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0);
+                        performServerExit(lastActiveRoomId, !hasStartedPlaying);
+                    }
+                }
+
+                console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
+                isLoggedIn = true;
+                document.getElementById('scene-auth').classList.add('hidden');
+                roomFetchPromise = null;
+                fetchRaceRooms(false);
+                fetchMyRooms();
             }
- 
-            console.log(`[Auth] User: ${currentUser.email}, IsAdmin: ${isAdminUser}`);
-            isLoggedIn = true;
-            const authScene = document.getElementById('scene-auth');
-            if (authScene) authScene.classList.add('hidden');
- 
-            roomFetchPromise = null;
-            fetchRaceRooms(false);
+
+            updateCoinUI();
             fetchMyRooms();
-        }
- 
-        // 데이터 변경 시마다 항상 실행할 UI 업데이트
-        updateCoinUI();
-        fetchMyRooms();
-        const sceneUserProfile = document.getElementById('scene-user-profile');
-        if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
-            showUserProfile();
-        }
-    }, (error) => {
-        console.error("❌ 유저 데이터 실시간 수신 실패:", error);
-        // 권한 오류 시 알림을 띄우지 않고 로깅만 합니다. (로그아웃 중 발생할 수 있음)
-        // alert("유저 정보를 실시간으로 동기화하는 중 오류가 발생했습니다.");
-    });
+            const sceneUserProfile = document.getElementById('scene-user-profile');
+            if (sceneUserProfile && !sceneUserProfile.classList.contains('hidden')) {
+                showUserProfile();
+            }
+        }, (error) => {
+            console.error("❌ 유저 데이터 실시간 수신 실패:", error);
+        });
+    } catch (error) {
+        console.error("❌ 유저 데이터 초기 로딩/생성 실패:", error);
+        alert("유저 정보를 불러오는 중 오류가 발생했습니다.");
+    }
 }
 
 /**
@@ -3336,16 +3325,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // [신규] 탭 내 새로고침 버튼 이벤트
     document.querySelectorAll('.list-tabgroup .refresh').forEach(btn => {
-        btn.onclick = (e) => {
+        btn.onclick = async (e) => {
             e.stopPropagation(); // 부모인 탭의 클릭 이벤트가 전파되는 것을 막습니다.
 
             // [FIX] 새로고침 버튼이 동작하지 않는 문제 해결
             // 원인: 1. 중복 호출 방지 로직 때문에 새로고침이 무시됨. 2. '참가중' 목록 갱신 로직 누락.
             // 해결: 1. 기존 Promise를 초기화하여 강제로 목록을 다시 불러오도록 수정.
             //      2. '참가중' 목록도 함께 갱신하도록 fetchMyRooms()를 호출.
+            //      3. [FIX] fetchRaceRooms가 완료될 때까지 기다린(await) 후 fetchMyRooms를 호출하여 데이터 경합을 방지합니다.
             console.log("🔄️ 목록 새로고침 버튼 클릭됨.");
             roomFetchPromise = null; // 기존 Promise를 초기화하여 fetchRaceRooms가 다시 실행되도록 함
-            fetchRaceRooms(false);
+            await fetchRaceRooms(false);
             fetchMyRooms();
         };
     });
