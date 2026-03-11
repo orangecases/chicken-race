@@ -2379,13 +2379,8 @@ function loginWithGoogle() {
 
 /**
  * [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
- * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현
- */
-/**
- * [신규] 서버에서 유저 데이터를 불러오거나, 신규 유저일 경우 생성합니다.
  * [수정] onSnapshot을 사용하여 실시간 데이터 동기화 구현 및 비정상 종료 복구 (F5 등)
  */
-function loadUserData(user) {
 async function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
 
