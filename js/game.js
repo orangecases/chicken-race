@@ -1132,16 +1132,20 @@ function fetchRaceRooms(loadMore = false) {
             .limit(currentRoomLimit + 5)
             .onSnapshot((querySnapshot) => {
                 
-                // 💡 핵심 방어 로직: 서버 응답 전의 '빈 깡통 캐시'를 식별합니다.
-                const isCacheEmpty = querySnapshot.metadata.fromCache && querySnapshot.empty;
+                // 🚨 핵심 수정 부분: 파이어베이스의 '불완전한 로컬 캐시'를 무조건 무시합니다.
+                // 캐시에 방금 입장했던 방 1개만 남아있을 때 이를 전체 데이터로 착각하는 버그를 원천 차단합니다.
+                if (querySnapshot.metadata.fromCache) {
+                    console.log("⏳ 캐시 데이터 무시, 서버 응답 대기 중...");
+                    return; 
+                }
 
-                // 빈 깡통이 아닐 때만 첫 콜백으로 인정하여 목록을 갈아끼웁니다.
-                if (isFirstCallback && !isCacheEmpty) {
+                // 무조건 서버에서 온 정확한 응답만을 첫 콜백으로 취급합니다.
+                if (isFirstCallback) {
                     const newRooms = [];
                     querySnapshot.forEach(doc => {
                         newRooms.push(mapFirestoreDocToRoom(doc));
                     });
-                    raceRooms = newRooms; // 최신 데이터 갱신
+                    raceRooms = newRooms; // 서버의 최신 전체 데이터로 확실하게 갱신
                     
                     isFirstCallback = false; // 이제부터는 실시간 '레이아웃 안정' 모드로 전환
 
@@ -1158,7 +1162,7 @@ function fetchRaceRooms(loadMore = false) {
                         resolvePromise = null;
                     }
 
-                } else if (!isFirstCallback) {
+                } else {
                     // 화면에 머무는 동안의 실시간 동기화 (Laila님 의도대로 added 무시)
                     querySnapshot.docChanges().forEach((change) => {
                         const roomData = mapFirestoreDocToRoom(change.doc);
