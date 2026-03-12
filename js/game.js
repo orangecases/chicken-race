@@ -1241,20 +1241,23 @@ function fetchRaceRooms(loadMore = false) {
 async function fetchMyRooms() {
     if (!isLoggedIn || !currentUser || !currentUser.joinedRooms) {
         myRooms = [];
-        renderRoomLists();
+        renderMyRoomList();
+        updateLoadMoreButtons();
         return;
     }
     const roomIds = Object.keys(currentUser.joinedRooms).sort(); // ID 정렬하여 비교
     if (roomIds.length === 0) {
         myRooms = [];
-        renderRoomLists();
+        renderMyRoomList();
+        updateLoadMoreButtons();
         return;
     }
 
     // [신규] 참가한 방 목록이 이전과 동일하고, 리스너가 이미 동작 중이라면 재로딩하지 않음 (깜빡임 방지)
     const currentJoinedRoomIdsJSON = JSON.stringify(roomIds);
     if (unsubscribeMyRoomsListeners.length > 0 && lastJoinedRoomIdsJSON === currentJoinedRoomIdsJSON) {
-        renderRoomLists();
+        renderMyRoomList();
+        updateLoadMoreButtons();
         return;
     }
     lastJoinedRoomIdsJSON = currentJoinedRoomIdsJSON;
@@ -1294,8 +1297,7 @@ async function fetchMyRooms() {
                     const timeB = b.createdAt?.toMillis() || 0;
                     return timeB - timeA;
                 });
-                renderMyRoomList(); // 목록 갱신
-                updateLoadMoreButtons();
+                renderRoomLists(); // 목록 갱신
             }, error => {
                 console.error(`❌ 내 방 [${roomId}] 실시간 수신 오류:`, error);
             });
@@ -1740,26 +1742,26 @@ function calculateMyLocalDisplayScore() {
     return displayScore;
 }
 
-function renderRoomLists() {
+/**
+ * [리팩토링] 레이스룸 목록만 렌더링하는 함수
+ */
+function renderRaceRoomList() {
     const raceRoomList = document.querySelector('#content-race-room .score-list');
-    const myRoomList = document.querySelector('#content-my-rooms .score-list');
-    if (!raceRoomList || !myRoomList) return;
-
+    if (!raceRoomList) return;
     raceRoomList.innerHTML = '';
-    myRoomList.innerHTML = '';
 
     // [FIX] 사용자가 참가한 모든 방의 ID 목록을 미리 만듭니다. (레이스룸 목록에서 중복 제외용)
     const allMyJoinedRoomIds = (isLoggedIn && currentUser && currentUser.joinedRooms) ? Object.keys(currentUser.joinedRooms) : [];
 
     // [FIX] 상태 저장을 위한 스냅샷 로직을 제거하고, 렌더링 시점에 raceRooms를 직접 필터링하여 목록을 생성합니다.
     // 이렇게 하면 다른 비동기 호출(예: fetchMyRooms)에 의해 목록이 깨지는 현상을 방지할 수 있습니다.
+    // [FIX] 꽉 찬 방도 목록에 표시하되 '마감'으로 보이도록 `r.current < r.limit` 필터 제거
     const raceRoomsToRender = raceRooms
-        .filter(r => r.current > 0 && r.current < r.limit && !allMyJoinedRoomIds.includes(r.id))
+        .filter(r => r.current > 0 && !allMyJoinedRoomIds.includes(r.id))
         .slice(0, currentRoomLimit);
 
     raceRoomsToRender.forEach(room => {
         const userRoomState = (isLoggedIn && currentUser && currentUser.joinedRooms) ? currentUser.joinedRooms[room.id] : null;
-        const userUsedAttempts = userRoomState ? userRoomState.usedAttempts : 0;
 
         const rankTypeText = room.rankType === 'total' ? '합산점' : '최고점';
         const lockImg = room.isLocked ? `<img class="lock" src="assets/images/icon_lock.png">` : '';
@@ -1769,79 +1771,81 @@ function renderRoomLists() {
             : '';
         const raceLi = document.createElement('li');
 
-            // [FIX] 'already-joined' 스타일이 방 생성 직후에도 적용되는 문제 수정
-            // 방에 참가만 한 상태가 아니라, 실제로 게임을 시작(코인 지불)했거나 시도 횟수를 사용한 경우에만 적용합니다.
-            if (userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0)) {
-                raceLi.classList.add('already-joined');
-            }
+        // [FIX] 'already-joined' 스타일이 방 생성 직후에도 적용되는 문제 수정
+        // 방에 참가만 한 상태가 아니라, 실제로 게임을 시작(코인 지불)했거나 시도 횟수를 사용한 경우에만 적용합니다.
+        if (userRoomState && (userRoomState.isPaid || userRoomState.usedAttempts > 0)) {
+            raceLi.classList.add('already-joined');
+        }
 
-            // [FIX] 인원이 가득 찬 방의 상태와 입장 가능 여부를 명확히 처리합니다.
-            const isFull = room.current >= room.limit;
-            const statusClass = isFull ? 'finished' : 'inprogress';
-            const aggIcon = room.limit >= 4 ? '<img class="agg" src="assets/images/icon_agg.png">' : '';
-            const statusText = isFull ? `${aggIcon}마감: ${room.current}/${room.limit}명` : `${aggIcon}모집: ${room.current}/${room.limit}명`;
+        // [FIX] 인원이 가득 찬 방의 상태와 입장 가능 여부를 명확히 처리합니다.
+        const isFull = room.current >= room.limit;
+        const statusClass = isFull ? 'finished' : 'inprogress';
+        const aggIcon = room.limit >= 4 ? '<img class="agg" src="assets/images/icon_agg.png">' : '';
+        const statusText = isFull ? `${aggIcon}마감: ${room.current}/${room.limit}명` : `${aggIcon}모집: ${room.current}/${room.limit}명`;
 
-            // 내가 참가하지 않았고, 인원이 가득 찬 방은 입장 불가 처리
-            const isJoinable = !isFull || (isFull && userRoomState);
+        // 내가 참가하지 않았고, 인원이 가득 찬 방은 입장 불가 처리
+        const isJoinable = !isFull || (isFull && userRoomState);
+        if (!isJoinable) {
+            raceLi.classList.add('disabled');
+        }
+
+        raceLi.innerHTML = `
+            <div class="info">
+                <label>
+                    <span class="${statusClass}">${statusText}</span>
+                    <span class="game_info">${rankTypeText}</span>
+                    <img class="coin" src="assets/images/icon_coin.png">
+                    <span class="game_info">X <strong>${room.attempts}</strong></span>
+                </label>
+                <p>${room.title} ${debugButtonsHTML}</p>
+            </div>
+            ${lockImg}
+            <span class="stat"><img class="chevron" src="assets/images/ico128-chevron.png"/></span>`;
+
+        raceLi.onclick = () => {
+            // 입장 불가 방 클릭 시 알림
             if (!isJoinable) {
-                raceLi.classList.add('disabled');
+                alert('인원이 모두 충원되었습니다.');
+                return;
             }
 
-            raceLi.innerHTML = `
-                <div class="info">
-                    <label>
-                        <span class="${statusClass}">${statusText}</span>
-                        <span class="game_info">${rankTypeText}</span>
-                        <img class="coin" src="assets/images/icon_coin.png">
-                        <span class="game_info">X <strong>${room.attempts}</strong></span>
-                    </label>
-                    <p>${room.title} ${debugButtonsHTML}</p>
-                </div>
-                ${lockImg}
-                <span class="stat"><img class="chevron" src="assets/images/ico128-chevron.png"/></span>`;
-
-            raceLi.onclick = () => {
-                // 입장 불가 방 클릭 시 알림
-                if (!isJoinable) {
-                    alert('인원이 모두 충원되었습니다.');
-                    return;
-                }
-
-                if (room.isLocked && !unlockedRoomIds.includes(room.id)) {
-                    showPasswordInput(room);
-                } else {
-                    attemptToJoinRoom(room);
-                }
-            };
-            raceRoomList.appendChild(raceLi);
+            if (room.isLocked && !unlockedRoomIds.includes(room.id)) {
+                showPasswordInput(room);
+            } else {
+                attemptToJoinRoom(room);
+            }
+        };
+        raceRoomList.appendChild(raceLi);
     });
 
-    // [수정] 참가중인 방 목록 렌더링 (myRooms 배열 사용)
+    if (raceRoomList.children.length === 0) {
+        raceRoomList.innerHTML = '<li><div class="info" style="text-align:center; width:100%;"><p>참여 가능한 레이스룸이 없습니다.</p></div></li>';
+    }
+}
+
+/**
+ * [리팩토링] 참가중인 방 목록만 렌더링하는 함수
+ */
+function renderMyRoomList() {
+    const myRoomList = document.querySelector('#content-my-rooms .score-list');
+    if (!myRoomList) return;
+    myRoomList.innerHTML = '';
+
     myRooms.forEach(room => {
         const userRoomState = (isLoggedIn && currentUser && currentUser.joinedRooms) ? currentUser.joinedRooms[room.id] : null;
         // [FIX] 사용자가 '목록에서 삭제'하여 숨김 처리한 방은 렌더링하지 않습니다.
         if (userRoomState && !userRoomState.hidden) {
             const rankTypeText = room.rankType === 'total' ? '합산점' : '최고점';
-            // [신규] 디버깅용 봇 추가/삭제 버튼 HTML
             const debugButtonsHTML = (currentUser && currentUser.isAdmin)
                 ? `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`
                 : '';
 
-            // [FIX] userUsedAttempts 변수가 정의되지 않아 렌더링이 중단되는 오류 수정
             const userUsedAttempts = userRoomState.usedAttempts;
             const isMyPlayFinished = userUsedAttempts >= room.attempts;
             const isRoomGloballyFinished = room.status === "finished";
 
-            let myRoomStatusText;
-            let myRoomStatusClass;
-
-            if (isRoomGloballyFinished) {
-                myRoomStatusText = "종료";
-                myRoomStatusClass = "finished";
-            } else {
-                myRoomStatusText = `진행중 (${room.current}/${room.limit}명)`;
-                myRoomStatusClass = "inprogress";
-            }
+            const myRoomStatusText = isRoomGloballyFinished ? "종료" : `진행중 (${room.current}/${room.limit}명)`;
+            const myRoomStatusClass = isRoomGloballyFinished ? "finished" : "inprogress";
 
             const myLi = document.createElement('li');
             myLi.innerHTML = `
@@ -1855,7 +1859,7 @@ function renderRoomLists() {
                     <p>${room.title} ${debugButtonsHTML}</p>
                 </div>
                 <span class="stat"><img class="chevron" src="assets/images/ico128-chevron.png"/></span>`;
-            myLi.onclick = () => { // [수정] 비로그인 상태에서 클릭 시 로그인 유도 (레이스룸 목록과 로직 통일)
+            myLi.onclick = () => {
                 if (!isLoggedIn) {
                     const sceneAuth = document.getElementById('scene-auth');
                     if (sceneAuth) {
@@ -1874,17 +1878,17 @@ function renderRoomLists() {
         }
     });
 
+    // [수정] 목록이 비어있을 때 안내 문구 표시 로직 개선
+    if (raceRoomList.children.length === 0) {
+        raceRoomList.innerHTML = '<li><div class="info" style="text-align:center; width:100%;"><p>참여 가능한 레이스룸이 없습니다.</p></div></li>';
+    }
+    // '참가중인 방' 목록 상태 메시지 처리
     if (!isLoggedIn) {
         myRoomList.innerHTML = '<li><div class="info" style="text-align:center; width:100%;"><p>로그인 후 이용 가능합니다.</p></div></li>';
     } else if (myRoomList.children.length === 0) {
         myRoomList.innerHTML = '<li><div class="info" style="text-align:center; width:100%;"><p>참가중인 레이스룸이 없습니다.</p></div></li>';
     }
-}
 
-/**
- * [리팩토링] '더보기' 버튼의 표시 상태를 업데이트하는 함수
- */
-function updateLoadMoreButtons() {
     // [신규] 탭 상태에 따라 '더보기' 버튼(로더) 표시 여부 제어
     const loader = document.getElementById('race-room-loader');
     const myLoader = document.getElementById('my-room-loader');
@@ -1904,15 +1908,6 @@ function updateLoadMoreButtons() {
             else myLoader.classList.add('hidden');
         }
     }
-}
-
-/**
- * [리팩토링] 모든 방 목록 UI를 새로고침하는 통합 함수
- */
-function renderRoomLists() {
-    renderRaceRoomList();
-    renderMyRoomList();
-    updateLoadMoreButtons();
 }
 
 async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함수로 변경
