@@ -1104,8 +1104,6 @@ function mapFirestoreDocToRoom(doc) {
 
 let roomFetchPromise = null; 
 
-let roomFetchPromise = null; 
-
 function fetchRaceRooms(loadMore = false) {
     if (roomFetchPromise && !loadMore) return roomFetchPromise;
 
