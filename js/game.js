@@ -1556,7 +1556,9 @@ function renderMultiRanking() {
     const isTotalMode = currentRoom.rankType === 'total';
     const myId = currentUser ? currentUser.id : 'me';
 
-    const sortedPlayers = [...multiGamePlayers].sort((a, b) => {
+    const sortedPlayers = [...multiGamePlayers]
+        .filter(p => !p.hidden)
+        .sort((a, b) => {
         const scoreA = a.id === myId ? calculateMyLocalDisplayScore() : (a.displayScore || 0);
         const scoreB = b.id === myId ? calculateMyLocalDisplayScore() : (b.displayScore || 0);
         return scoreB - scoreA;
@@ -2052,8 +2054,11 @@ async function removeFromMyRooms() {
 
     const roomId = currentRoom.id;
     const myId = currentUser.id;
+    const roomRef = db.collection('rooms').doc(roomId);
+    const participantsRef = roomRef.collection('participants');
 
     try {
+        // 1. 내 프로필의 joinedRooms에서 숨김 처리
         if (currentUser.joinedRooms[roomId]) {
             currentUser.joinedRooms[roomId].hidden = true; 
             await db.collection("users").doc(myId).update({
@@ -2061,10 +2066,28 @@ async function removeFromMyRooms() {
             });
         }
 
-        const participantRef = db.collection('rooms').doc(roomId).collection('participants').doc(myId);
-        await participantRef.update({ hidden: true });
-
+        // 2. 방 안의 내 참가자(participant) 정보 숨김 처리
+        await participantsRef.doc(myId).update({ hidden: true });
         console.log(`✅ 방 [${roomId}]을(를) '참가중인 목록'에서 숨겼습니다.`);
+
+        // 3. 🚨 [신규] 나를 포함해 이 방의 '모든' 참가자가 숨김(hidden) 상태인지 확인
+        const participantsSnapshot = await participantsRef.get();
+        let allHidden = true;
+        participantsSnapshot.forEach(doc => {
+            if (!doc.data().hidden) {
+                allHidden = false; // 한 명이라도 남아있으면 폭파 취소
+            }
+        });
+
+        // 4. 모두가 목록에서 지웠다면, 방 자체를 서버에서 완전히 삭제(폭파)
+        if (allHidden) {
+            try {
+                await roomRef.delete();
+                console.log(`💣 모든 참가자가 나갔습니다. 방 [${roomId}] 완전 폭파 완료!`);
+            } catch (deleteError) {
+                console.warn(`⚠️ 방 삭제 권한이 없어 남겨둡니다 (관리자 청소 필요):`, deleteError);
+            }
+        }
 
         await exitToLobby(false);
 
@@ -2964,7 +2987,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnExitCancel) {
         btnExitCancel.onclick = () => { if (sceneExitConfirm) sceneExitConfirm.classList.add('hidden'); };
     }
-
+    // 🚨 [추가] '참가중인 목록에서 삭제' 버튼을 눌렀을 때 확인 모달 띄우기
+    if (btnDeleteRoom) {
+        btnDeleteRoom.onclick = () => {
+            const sceneDeleteRoomConfirm = document.getElementById('scene-delete-room-confirm');
+            if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.remove('hidden');
+        };
+    }
     if (btnDeleteRoomConfirm) {
         btnDeleteRoomConfirm.onclick = async () => {
             if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.add('hidden');
