@@ -1389,9 +1389,11 @@ async function exitToLobby(isFullExit = false) {
 
     updateCoinUI();
 
-    // 🚨 기존 리스너를 파괴하고 재호출하는 로직 삭제
-    // 백그라운드에서 onSnapshot이 이미 데이터를 최신화하고 있으므로 화면만 다시 그립니다.
-    renderRoomLists();
+    // [수정] 로비로 돌아올 때, 항상 최신 방 목록을 가져오도록 강제합니다.
+    // 캐시된 Promise를 초기화하여 fetchRaceRooms가 항상 서버에서 새 데이터를 가져오게 합니다.
+    roomFetchPromise = null;
+    fetchRaceRooms(false);
+    fetchMyRooms();
 
     document.getElementById('scene-intro').classList.remove('hidden');
     document.getElementById('scene-game').classList.add('hidden');
@@ -3084,8 +3086,11 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', () => {
-        // 🚨 재호출 대신 화면 렌더링만 갱신
-        renderRoomLists();
+        // [수정] 탭을 전환할 때마다 항상 최신 방 목록을 가져오도록 강제합니다.
+        console.log("🔄️ 탭 전환으로 목록 새로고침을 요청합니다.");
+        roomFetchPromise = null; // 캐시된 Promise를 초기화하여 재호출을 강제합니다.
+        fetchRaceRooms(false);
+        fetchMyRooms();
     });
 
     initTabs('tab-my-record', 'tab-top-100', 'content-my-record', 'content-top-100', () => {
@@ -3098,8 +3103,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.list-tabgroup .refresh').forEach(btn => {
         btn.onclick = (e) => {
             e.stopPropagation();
-            // 🚨 재호출 대신 화면 렌더링만 갱신
-            renderRoomLists();
+            // [수정] 새로고침 버튼 클릭 시, 항상 최신 방 목록을 가져오도록 강제합니다.
+            console.log("🔄️ 새로고침 버튼으로 목록 새로고침을 요청합니다.");
+            roomFetchPromise = null; // 캐시된 Promise를 초기화하여 재호출을 강제합니다.
+            fetchRaceRooms(false);
+            fetchMyRooms();
         };
     });
 
