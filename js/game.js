@@ -1556,9 +1556,7 @@ function renderMultiRanking() {
     const isTotalMode = currentRoom.rankType === 'total';
     const myId = currentUser ? currentUser.id : 'me';
 
-    const sortedPlayers = [...multiGamePlayers]
-        .filter(p => !p.hidden)
-        .sort((a, b) => {
+    const sortedPlayers = [...multiGamePlayers].sort((a, b) => {
         const scoreA = a.id === myId ? calculateMyLocalDisplayScore() : (a.displayScore || 0);
         const scoreB = b.id === myId ? calculateMyLocalDisplayScore() : (b.displayScore || 0);
         return scoreB - scoreA;
@@ -2620,28 +2618,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     break;
                 case 'force-delete':
                     console.log(`[Debug] Bot [${botId}] '목록에서 삭제' 시뮬레이션`);
-                    const roomRefForDelete = db.collection('rooms').doc(currentRoom.id);
-                    const participantsRefForDelete = roomRefForDelete.collection('participants');
+                    
+                    try {
+                        // 1. 해당 봇의 상태만 hidden으로 업데이트 (데이터는 유지)
+                        await participantRef.update({ hidden: true });
+                        console.log(`✅ 봇 [${botId}]이(가) '목록 삭제'를 선언했습니다.`);
 
-                    await db.runTransaction(async (transaction) => {
-                        const participantsSnapshot = await transaction.get(participantsRefForDelete);
-                        const botDoc = participantsSnapshot.docs.find(doc => doc.id === botId);
-                        if (!botDoc) return;
-
-                        transaction.update(botDoc.ref, { hidden: true });
-
-                        let allParticipantsHidden = true;
+                        // 2. 방 안의 모든 참가자(유저+봇)의 hidden 상태 확인
+                        const roomRefForDelete = db.collection('rooms').doc(currentRoom.id);
+                        const participantsSnapshot = await roomRefForDelete.collection('participants').get();
+                        
+                        let allHidden = true;
                         participantsSnapshot.forEach(doc => {
-                            if (doc.id !== botId && !doc.data().hidden) {
-                                allParticipantsHidden = false;
+                            if (!doc.data().hidden) {
+                                allHidden = false; // 한 명이라도 기록을 보고 있다면 폭파 취소
                             }
                         });
 
-                        if (allParticipantsHidden) {
-                            console.log(`모든 참가자가 목록에서 방을 제거했습니다. 방 [${currentRoom.id}]을(를) 삭제합니다.`);
-                            transaction.delete(roomRefForDelete);
+                        // 3. 만약 모든 참가자가 목록 삭제를 선언했다면 방 완전 폭파!
+                        if (allHidden) {
+                            console.log(`💣 모든 참가자가 삭제 선언을 했습니다. 방 [${currentRoom.id}]을(를) 완전 삭제합니다.`);
+                            await roomRefForDelete.delete();
+                            
+                            // 관리자 본인도 방이 폭파되었으므로 로비로 이동
+                            exitToLobby(false);
                         }
-                    });
+                    } catch (err) {
+                        console.error("❌ 봇 삭제 시뮬레이션 오류:", err);
+                    }
                     break;
             }
         } catch (error) {
