@@ -3342,8 +3342,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     // [수정] 레이스룸/참가중 탭 전환 시에는 renderRoomLists 함수를 콜백으로 전달하여 목록을 새로고침합니다.
-    initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', async () => {
-        initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', () => {
+    initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', () => {
         // [FIX] 탭 전환 시 목록이 비어 보이는 문제를 해결합니다.
         // 원인: 탭 클릭 시 fetch가 완료되기도 전에 renderRoomLists(true)가 동기적으로 호출되어, 오래된 데이터로 목록을 다시 그렸습니다.
         // 해결: 동기 렌더링을 제거하고, roomFetchPromise를 null로 만들어 항상 새로운 데이터를 가져오도록 강제합니다.
@@ -3379,6 +3378,174 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // [신규] 방 삭제 버튼
     if (btnDeleteRoom) {
+        btnDeleteRoom.onclick = () => {
+            if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.remove('hidden');
+        };
+    }
+
+    // [신규] 모든 모달의 닫기 버튼에 대한 공통 이벤트 리스너
+    document.querySelectorAll('.modal-container .close_modal').forEach(btn => {
+        btn.onclick = () => {
+            // 버튼이 속한 가장 가까운 부모 <section> (모달 전체)을 찾아 숨깁니다.
+            btn.closest('section').classList.add('hidden');
+        };
+    });
+
+    // [신규] 일시정지 및 이어하기 버튼 이벤트
+    if (btnPauseToggle) btnPauseToggle.onclick = togglePause;
+    if (btnResumeGame) btnResumeGame.onclick = togglePause;
+
+    if (btnSingle) btnSingle.onclick = () => enterGameScene('single');
+
+    if (btnRaceStart) {
+        btnRaceStart.onclick = () => {
+            // [신규] 싱글 모드일 때만 시작 시 코인 차감 (1코인)
+            if (currentGameMode === 'single') {
+                // [신규] 게스트 코인이 부족할 경우 자동 충전 로직 추가
+                if (!currentUser && guestCoins < 1) {
+                    alert("게스트 코인이 모두 소진되어 10코인을 새로 충전해 드립니다! 다시 신나게 달려보세요.");
+                    guestCoins = 10;
+                    localStorage.setItem('chickenRunGuestCoins', guestCoins);
+                    updateCoinUI();
+                }
+
+                const currentCoins = currentUser ? currentUser.coins : guestCoins;
+                if (currentCoins < 1) {
+                    alert("코인이 부족하여 게임을 시작할 수 없습니다.");
+                    return;
+                }
+                
+                if (currentUser) {
+                    currentUser.coins -= 1;
+                    syncCoinsToServer(currentUser.coins);
+                } else {
+                    guestCoins -= 1;
+                    localStorage.setItem('chickenRunGuestCoins', guestCoins);
+                }
+                updateCoinUI();
+            }
+            
+            // [신규] 멀티 모드 시작 시 비용 지불 확인 (방 생성자 등 미지불 상태인 경우)
+            if (currentGameMode === 'multi' && currentRoom && currentUser) {
+                const userRoomState = currentUser.joinedRooms[currentRoom.id];
+                if (userRoomState && !userRoomState.isPaid) {
+                    const cost = currentRoom.attempts;
+                    if (currentUser.coins < cost) {
+                        alert(`코인이 부족합니다.\n(필요: ${cost}, 보유: ${currentUser.coins})`);
+                        return;
+                    }
+                    currentUser.coins -= cost;
+                    userRoomState.isPaid = true;
+                    updateCoinUI();
+                    saveUserDataToFirestore(); // 코인과 isPaid 상태를 함께 저장
+                    updateButtonCosts(); // UI 갱신
+                }
+            }
+
+            clearAutoActionTimer(); 
+            document.getElementById('game-start-screen').classList.add('hidden');
+            setControlsVisibility(true); // [수정] 게임 시작 시 컨트롤러 표시
+            // 0.5초 애니메이션 간격 후 게임 시작
+            setTimeout(() => {
+                // [수정] 루프를 새로 시작하는 대신 상태를 변경하여 게임 진행
+                if (gameLoopId) cancelAnimationFrame(gameLoopId);
+                
+                // [3단계] 게임 시작 시 내 상태를 'playing'으로 서버에 업데이트
+                if (currentGameMode === 'multi' && currentUser) {
+                    const myId = currentUser.id;
+                    const myPlayer = multiGamePlayers.find(p => p.id === myId);
+                    if (myPlayer) {
+                        myPlayer.status = 'playing';
+                        const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
+                        participantDocRef.update({ status: 'playing' }).catch(e => console.error("상태 업데이트 실패(playing)", e));
+                    }
+                }
+                playSound('start');
+                playSound('bgm'); 
+                gameState = STATE.PLAYING; // [FIX] 게임 상태를 'PLAYING'으로 변경하여 게임 로직 실행
+                gameLoop();
+            }, 500);
+        };
+    }
+
+    if (btnRestart) {
+        btnRestart.onclick = () => {
+            // [신규] 싱글 모드일 때만 재시작 시 코인 차감 (1코인)
+            if (currentGameMode === 'single') {
+                // [신규] 게스트 코인이 부족할 경우 자동 충전 로직 추가
+                if (!currentUser && guestCoins < 1) {
+                    alert("게스트 코인이 모두 소진되어 10코인을 새로 충전해 드립니다! 다시 신나게 달려보세요.");
+                    guestCoins = 10;
+                    localStorage.setItem('chickenRunGuestCoins', guestCoins);
+                    updateCoinUI();
+                }
+
+                const currentCoins = currentUser ? currentUser.coins : guestCoins;
+                if (currentCoins < 1) {
+                    alert("코인이 부족하여 게임을 시작할 수 없습니다.");
+                    return;
+                }
+                
+                if (currentUser) {
+                    currentUser.coins -= 1;
+                    syncCoinsToServer(currentUser.coins);
+                } else {
+                    guestCoins -= 1;
+                    localStorage.setItem('chickenRunGuestCoins', guestCoins);
+                }
+                updateCoinUI();
+            }
+
+            clearAutoActionTimer();
+            document.getElementById('game-over-screen').classList.add('hidden');
+            setControlsVisibility(true); // [수정] 게임 재시작 시 컨트롤러 표시
+            // 0.5초 애니메이션 간격 후 게임 재시작
+            setTimeout(() => {
+                resetGame();
+                if (gameLoopId) cancelAnimationFrame(gameLoopId);
+
+                // [3단계] 게임 재시작 시 내 상태를 'playing'으로 서버에 업데이트
+                if (currentGameMode === 'multi' && currentUser) {
+                    const myId = currentUser.id;
+                    const myPlayer = multiGamePlayers.find(p => p.id === myId);
+                    if (myPlayer) {
+                        myPlayer.status = 'playing';
+                        const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
+                        participantDocRef.update({ status: 'playing' }).catch(e => console.error("상태 업데이트 실패(playing)", e));
+                    }
+                }
+                playSound('start');
+                playSound('bgm'); 
+                gameState = STATE.PLAYING; // [핵심] 상태를 PLAYING으로 변경하여 게임 시작
+                gameLoop();
+            }, 500);
+        };
+    }
+
+    // [신규] 사운드 버튼 토글
+    if (btnSoundToggle) {
+        // 초기 상태 설정
+        btnSoundToggle.classList.toggle('sound-on', isSoundOn);
+        btnSoundToggle.classList.toggle('sound-off', !isSoundOn);
+
+        btnSoundToggle.onclick = () => {
+            isSoundOn = !isSoundOn; // 상태 토글
+            btnSoundToggle.classList.toggle('sound-on', isSoundOn);
+            btnSoundToggle.classList.toggle('sound-off', !isSoundOn);
+            console.log(`사운드 상태: ${isSoundOn ? 'ON' : 'OFF'}`);
+            // [신규] 사운드 토글 즉시 반영
+            if (isSoundOn) {
+                if (gameState === STATE.PLAYING) playSound('bgm');
+            } else {
+                pauseBGM();
+            }
+        };
+    }
+
+    // [개발용] 콘솔에서 초기화 함수를 쉽게 호출할 수 있도록 window 객체에 할당
+    window.resetAdCount = resetAdCount;
+    window.resetRoomData = resetRoomData;
+});
         btnDeleteRoom.onclick = () => {
             if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.remove('hidden');
         };
