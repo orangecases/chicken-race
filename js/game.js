@@ -1596,7 +1596,14 @@ async function attemptToJoinRoom(room) {
                 delete currentUser.joinedRooms[idToLeave];
             });
         }
-        currentUser.joinedRooms[room.id] = { usedAttempts: 0, isPaid: false };
+        const newJoinedRoomData = { usedAttempts: 0, isPaid: false };
+        currentUser.joinedRooms[room.id] = newJoinedRoomData;
+
+        // [FIX] 참여 정보를 Firestore에 즉시 저장하여 새로고침 시에도 유지되도록 함
+        await db.collection("users").doc(currentUser.id).update({
+            [`joinedRooms.${room.id}`]: newJoinedRoomData
+        });
+
         enterGameScene('multi', room);
     } catch (error) {
         console.error("❌ 방 입장 실패:", error);
