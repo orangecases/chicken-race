@@ -2450,9 +2450,13 @@ async function loadUserData(user) {
             joinedRooms: {}
         };
 
-        // set({ merge: true })는 문서가 없으면 생성하고, 있으면 필드를 병합합니다.
-        await userRef.set(initialUserData, { merge: true });
-        console.log("✅ User document ensured on client-side.");
+        // [FIX] 기존 데이터 유지를 위해 문서가 존재하지 않을 때만 초기 데이터를 생성합니다.
+        // 기존: 무조건 set({merge:true})를 호출하여 joinedRooms, coins 등을 초기값으로 덮어쓰는 문제 발생
+        const docSnap = await userRef.get();
+        if (!docSnap.exists) {
+            await userRef.set(initialUserData);
+            console.log("✅ User document created on client-side.");
+        }
 
         // 2. 이제 문서가 확실히 존재하므로, 실시간 리스너를 안전하게 부착합니다.
         let initialLoadComplete = false;
