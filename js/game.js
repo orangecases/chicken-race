@@ -723,7 +723,7 @@ function handleGameOverUI() {
     govScreen.classList.remove('hidden');
     setControlsVisibility(false); // [수정] 게임 종료 시 컨트롤 버튼 숨김
 
-    renderRoomLists();
+    renderRoomLists(); // 목록 갱신
     renderMultiRanking(); // [신규] 게임 오버 시 랭킹 즉시 갱신
 }
 
@@ -1201,7 +1201,7 @@ function fetchRaceRooms(loadMore = false) {
                         if (loader) loader.classList.remove('hidden');
                     }
 
-                    renderRoomLists(true);
+                    renderRoomLists();
                     isFirstCallback = false;
                     resolve(); // 데이터 로딩 완료 시 Promise 해결
                 } else {
@@ -1221,7 +1221,7 @@ function fetchRaceRooms(loadMore = false) {
                         // '추가(added)'는 무시합니다. 새 방은 '새로고침'이나 '더보기' 시에만 목록에 나타나야 합니다.
                     });
                     // 변경 사항이 반영된 목록을 다시 그리지만, 스냅샷은 유지하여 목록 순서나 길이가 변하지 않게 합니다.
-                    renderRoomLists(false);
+                    renderRoomLists();
                 }
             }, (error) => {
                 console.error("❌ 방 목록 리스너 오류:", error);
@@ -1240,20 +1240,20 @@ function fetchRaceRooms(loadMore = false) {
 async function fetchMyRooms() {
     if (!isLoggedIn || !currentUser || !currentUser.joinedRooms) {
         myRooms = [];
-        renderRoomLists(true);
+        renderRoomLists();
         return;
     }
     const roomIds = Object.keys(currentUser.joinedRooms).sort(); // ID 정렬하여 비교
     if (roomIds.length === 0) {
         myRooms = [];
-        renderRoomLists(true);
+        renderRoomLists();
         return;
     }
 
     // [신규] 참가한 방 목록이 이전과 동일하고, 리스너가 이미 동작 중이라면 재로딩하지 않음 (깜빡임 방지)
     const currentJoinedRoomIdsJSON = JSON.stringify(roomIds);
     if (unsubscribeMyRoomsListeners.length > 0 && lastJoinedRoomIdsJSON === currentJoinedRoomIdsJSON) {
-        renderRoomLists(); // UI만 갱신
+        renderRoomLists();
         return;
     }
     lastJoinedRoomIdsJSON = currentJoinedRoomIdsJSON;
@@ -1293,7 +1293,7 @@ async function fetchMyRooms() {
                     const timeB = b.createdAt?.toMillis() || 0;
                     return timeB - timeA;
                 });
-                renderRoomLists(true); // 스냅샷을 갱신하며 렌더링
+                renderRoomLists(); // 목록 갱신
             }, error => {
                 console.error(`❌ 내 방 [${roomId}] 실시간 수신 오류:`, error);
             });
@@ -1607,8 +1607,8 @@ async function attemptToJoinRoom(room) {
         enterGameScene('multi', room);
     } catch (error) {
         console.error("❌ 방 입장 실패:", error);
-        alert(error); // "방이 가득 찼습니다." 또는 "존재하지 않는 방입니다." 등의 메시지 표시
-        renderRoomLists(true); // 목록을 최신 상태로 갱신하여 사용자에게 정확한 정보를 보여줍니다.
+        alert(String(error)); // "방이 가득 찼습니다." 또는 "존재하지 않는 방입니다." 등의 메시지 표시
+        renderRoomLists(); // 목록을 최신 상태로 갱신하여 사용자에게 정확한 정보를 보여줍니다.
     }
 }
 
@@ -1738,30 +1738,10 @@ function calculateMyLocalDisplayScore() {
     return displayScore;
 }
 
-let raceRoomSnapshot = [];
-let myRoomSnapshot = [];
-
-function renderRoomLists(refreshSnapshot = false) {
+function renderRoomLists() {
     const raceRoomList = document.querySelector('#content-race-room .score-list');
     const myRoomList = document.querySelector('#content-my-rooms .score-list');
     if (!raceRoomList || !myRoomList) return;
-
-    // [신규] 스냅샷 갱신 로직: 목록이 흔들리지 않도록 특정 시점에만 목록 구성을 확정합니다.
-    if (refreshSnapshot) {
-        // [FIX] 레이스룸 스냅샷 필터링 규칙 변경
-        // 1. 인원이 꽉 찬 방은 목록에서 제외 (`r.current < r.limit` 조건 추가)
-        // [수정] 꽉 찬 방도 목록에 노출하되 입장을 막는 방식으로 변경하여, 불러온 10개가 모두 보이도록 함 (`r.current < r.limit` 제거)
-        // [수정] 서버 쿼리에서 where를 뺐으므로 여기서 status 필터링 수행
-        // [FIX] 필터링 후 설정된 개수(currentRoomLimit)만큼만 잘라서 보여줍니다.
-        // [요청반영] 모집 마감된(꽉 찬) 방은 목록에서 제외합니다.
-        // [수정] 'finished' 상태의 방도 정원이 차지 않았다면 목록에 표시하여 재입장/부활이 가능하도록 r.status !== 'finished' 조건 제거
-        raceRoomSnapshot = raceRooms.filter(r => r.current > 0 && r.current < r.limit)
-            .slice(0, currentRoomLimit)
-            .map(r => r.id);
-
-        // 2. 내 방 스냅샷: fetchMyRooms로 가져온 데이터 사용
-        myRoomSnapshot = myRooms.map(r => r.id);
-    }
 
     raceRoomList.innerHTML = '';
     myRoomList.innerHTML = '';
@@ -1769,24 +1749,23 @@ function renderRoomLists(refreshSnapshot = false) {
     // [FIX] 사용자가 참가한 모든 방의 ID 목록을 미리 만듭니다. (레이스룸 목록에서 중복 제외용)
     const allMyJoinedRoomIds = (isLoggedIn && currentUser && currentUser.joinedRooms) ? Object.keys(currentUser.joinedRooms) : [];
 
-    raceRooms.forEach(room => {
-        // [수정] isFinished 상태를 사용자별 데이터(joinedRooms) 기준으로 판단
+    // [FIX] 상태 저장을 위한 스냅샷 로직을 제거하고, 렌더링 시점에 raceRooms를 직접 필터링하여 목록을 생성합니다.
+    // 이렇게 하면 다른 비동기 호출(예: fetchMyRooms)에 의해 목록이 깨지는 현상을 방지할 수 있습니다.
+    const raceRoomsToRender = raceRooms
+        .filter(r => r.current > 0 && r.current < r.limit && !allMyJoinedRoomIds.includes(r.id))
+        .slice(0, currentRoomLimit);
+
+    raceRoomsToRender.forEach(room => {
         const userRoomState = (isLoggedIn && currentUser && currentUser.joinedRooms) ? currentUser.joinedRooms[room.id] : null;
         const userUsedAttempts = userRoomState ? userRoomState.usedAttempts : 0;
 
         const rankTypeText = room.rankType === 'total' ? '합산점' : '최고점';
         const lockImg = room.isLocked ? `<img class="lock" src="assets/images/icon_lock.png">` : '';
 
-        // [신규] 디버깅용 봇 추가/삭제 버튼 HTML
         const debugButtonsHTML = (currentUser && currentUser.isAdmin)
             ? `<button class="debug-btn" data-room-id="${room.id}" data-action="add">+</button><button class="debug-btn" data-room-id="${room.id}" data-action="remove">-</button>`
             : '';
-
-        // 1. 레이스룸 목록 (공개):
-        // [FIX] 스냅샷에 포함되고, 사용자가 한 번도 참가한 적 없는 방만 렌더링합니다.
-        // 이렇게 하면 '참가중인 목록'에서 숨긴 방이 여기에 다시 나타나지 않습니다.
-        if (raceRoomSnapshot.includes(room.id) && !allMyJoinedRoomIds.includes(room.id)) {
-            const raceLi = document.createElement('li');
+        const raceLi = document.createElement('li');
 
             // [FIX] 'already-joined' 스타일이 방 생성 직후에도 적용되는 문제 수정
             // 방에 참가만 한 상태가 아니라, 실제로 게임을 시작(코인 지불)했거나 시도 횟수를 사용한 경우에만 적용합니다.
@@ -1833,8 +1812,6 @@ function renderRoomLists(refreshSnapshot = false) {
                 }
             };
             raceRoomList.appendChild(raceLi);
-        }
-
     });
 
     // [수정] 참가중인 방 목록 렌더링 (myRooms 배열 사용)
@@ -3547,4 +3524,3 @@ document.addEventListener('DOMContentLoaded', () => {
     window.resetAdCount = resetAdCount;
     window.resetRoomData = resetRoomData;
 });
-
