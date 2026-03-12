@@ -1389,14 +1389,9 @@ async function exitToLobby(isFullExit = false) {
 
     updateCoinUI();
 
-    roomFetchPromise = null;
-    
-    try {
-        await fetchRaceRooms(false);
-        fetchMyRooms();
-    } catch (e) {
-        console.warn("⚠️ 방 목록 갱신 실패 (무시하고 로비로 이동):", e);
-    }
+    // 🚨 기존 리스너를 파괴하고 재호출하는 로직 삭제
+    // 백그라운드에서 onSnapshot이 이미 데이터를 최신화하고 있으므로 화면만 다시 그립니다.
+    renderRoomLists();
 
     document.getElementById('scene-intro').classList.remove('hidden');
     document.getElementById('scene-game').classList.add('hidden');
@@ -2681,6 +2676,34 @@ document.addEventListener('DOMContentLoaded', () => {
         btnBoost.addEventListener('touchend', handleBoostEnd);
     }
 
+    // [신규] PC 환경 스페이스바 점프 이벤트 추가
+    window.addEventListener('keydown', (e) => {
+        // 입력창(비밀번호, 닉네임, 방제 등)에 포커스가 있을 때는 스페이스바 점프 방지
+        const targetTag = e.target.tagName.toLowerCase();
+        if (targetTag === 'input' || targetTag === 'textarea') return;
+
+        if (e.code === 'Space') {
+            e.preventDefault(); // 스페이스바로 인한 화면 스크롤 방지
+            if (!isJumpPressed && gameState === STATE.PLAYING) {
+                isJumpPressed = true;
+                if (btnJump) btnJump.classList.add('pressed');
+                chicken.jump(); // 닭 점프 실행
+            }
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        const targetTag = e.target.tagName.toLowerCase();
+        if (targetTag === 'input' || targetTag === 'textarea') return;
+
+        if (e.code === 'Space') {
+            e.preventDefault();
+            isJumpPressed = false;
+            if (btnJump) btnJump.classList.remove('pressed');
+            chicken.cutJump(); // 스페이스바를 떼면 소점프 처리
+        }
+    });
+
     const scenePasswordInput = document.getElementById('scene-password-input');
     const btnPasswordConfirm = document.getElementById('btn-password-confirm');
     const btnPasswordCancel = document.getElementById('btn-password-cancel');
@@ -3061,10 +3084,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', () => {
-        console.log("🔄️ 탭 전환으로 목록 새로고침을 요청합니다.");
-        roomFetchPromise = null;
-        fetchRaceRooms(false);
-        fetchMyRooms();
+        // 🚨 재호출 대신 화면 렌더링만 갱신
+        renderRoomLists();
     });
 
     initTabs('tab-my-record', 'tab-top-100', 'content-my-record', 'content-top-100', () => {
@@ -3077,10 +3098,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.list-tabgroup .refresh').forEach(btn => {
         btn.onclick = (e) => {
             e.stopPropagation();
-            console.log("🔄️ 새로고침 버튼으로 목록 새로고침을 요청합니다.");
-            roomFetchPromise = null;
-            fetchRaceRooms(false);
-            fetchMyRooms();
+            // 🚨 재호출 대신 화면 렌더링만 갱신
+            renderRoomLists();
         };
     });
 
