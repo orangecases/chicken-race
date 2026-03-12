@@ -1129,23 +1129,29 @@ function fetchRaceRooms(loadMore = false) {
 
         unsubscribeRoomListener = db.collection('rooms')
             .orderBy('createdAt', 'desc')
-            .limit(currentRoomLimit + 5)
+            // 💡 팁: 마감된 방이 필터링되면서 목록이 너무 적게 뜨는 것을 방지하기 위해 
+            // DB에서 여유 있게(+10) 가져오도록 수정했습니다.
+            .limit(currentRoomLimit + 10) 
             .onSnapshot((querySnapshot) => {
                 
-                // 🚨 핵심 수정 부분: 파이어베이스의 '불완전한 로컬 캐시'를 무조건 무시합니다.
-                // 캐시에 방금 입장했던 방 1개만 남아있을 때 이를 전체 데이터로 착각하는 버그를 원천 차단합니다.
                 if (querySnapshot.metadata.fromCache) {
                     console.log("⏳ 캐시 데이터 무시, 서버 응답 대기 중...");
                     return; 
                 }
 
-                // 무조건 서버에서 온 정확한 응답만을 첫 콜백으로 취급합니다.
                 if (isFirstCallback) {
                     const newRooms = [];
                     querySnapshot.forEach(doc => {
-                        newRooms.push(mapFirestoreDocToRoom(doc));
+                        const roomData = mapFirestoreDocToRoom(doc);
+                        
+                        // 🚨 핵심 기획 반영: 
+                        // 처음 불러올 때 '아직 인원이 덜 찼고, 종료되지 않은 방'만 배열에 담습니다.
+                        if (roomData.current < roomData.limit && roomData.status !== 'finished') {
+                            newRooms.push(roomData);
+                        }
                     });
-                    raceRooms = newRooms; // 서버의 최신 전체 데이터로 확실하게 갱신
+                    
+                    raceRooms = newRooms; // 필터링된 깔끔한 데이터로 화면 갱신
                     
                     isFirstCallback = false; // 이제부터는 실시간 '레이아웃 안정' 모드로 전환
 
@@ -1163,12 +1169,14 @@ function fetchRaceRooms(loadMore = false) {
                     }
 
                 } else {
-                    // 화면에 머무는 동안의 실시간 동기화 (Laila님 의도대로 added 무시)
+                    // 화면에 머무는 동안의 실시간 동기화 (Laila님 의도대로 작동하는 마법의 구간)
                     querySnapshot.docChanges().forEach((change) => {
                         const roomData = mapFirestoreDocToRoom(change.doc);
                         const index = raceRooms.findIndex(r => r.id === roomData.id);
 
                         if (change.type === 'modified') {
+                            // 1. 이미 배열에 있는 방이 마감됨 -> index가 있으므로 정보가 덮어씌워지고 '마감' 표시로 변경됨
+                            // 2. 마감돼서 배열에 없던 방에 빈자리가 생김 -> index가 없으므로 무시됨 (새로고침 전까지 안 보임)
                             if (index > -1) Object.assign(raceRooms[index], roomData);
                         } else if (change.type === 'removed') {
                             if (index > -1) raceRooms[index].current = 0;
@@ -1376,6 +1384,25 @@ async function performServerExit(roomId, isFullExit) {
             await participantRef.update({ status: 'dead' });
 
             awardBadgeIfEligible();
+
+            // 🚨 [신규 추가] 내가 포기함(dead)으로써 방의 모든 인원이 dead 상태가 되었는지 즉시 확인합니다.
+            const participantsSnapshot = await roomRef.collection('participants').get();
+            let allDead = true;
+            participantsSnapshot.forEach(doc => {
+                const pData = doc.data();
+                // 내 상태는 방금 dead로 업데이트 했으므로 dead로 간주, 나머지는 실제 DB 상태 확인
+                if (pData.id !== myId && pData.status !== 'dead') {
+                    allDead = false;
+                }
+            });
+
+            const isRoomFull = roomData.currentPlayers >= roomData.maxPlayers;
+            
+            // 모든 조건이 충족되었다면 방을 즉시 'finished' 처리합니다.
+            if (isRoomFull && allDead && roomData.status !== 'finished') {
+                await roomRef.update({ status: 'finished' });
+                console.log(`✅ 방 [${roomId}] 상태를 'finished'로 최종 변경했습니다 (Home버튼 퇴장).`);
+            }
         }
     } catch (error) {
         console.error(`❌ Server exit from room [${roomId}] failed:`, error);
