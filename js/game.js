@@ -3376,6 +3376,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnExitFromPause) btnExitFromPause.onclick = handleHomeButtonClick;
     if (btnExitFromGameover) btnExitFromGameover.onclick = handleHomeButtonClick;
 
+    
     // [신규] 방 삭제 버튼
     if (btnDeleteRoom) {
         btnDeleteRoom.onclick = () => {
@@ -3546,116 +3547,4 @@ document.addEventListener('DOMContentLoaded', () => {
     window.resetAdCount = resetAdCount;
     window.resetRoomData = resetRoomData;
 });
-        btnDeleteRoom.onclick = () => {
-            if (sceneDeleteRoomConfirm) sceneDeleteRoomConfirm.classList.remove('hidden');
-        };
-    }
 
-    // 점프/부스트 컨트롤
-    const btnJump = document.getElementById('btn-jump');
-    if (btnJump) {
-        const startJumping = (e) => {
-            e.preventDefault();
-            if (gameState === STATE.PLAYING) {
-                btnJump.classList.add('pressed');
-                isJumpPressed = true; // 누름 상태 유지
-                if (!chicken.isJumping) chicken.jump(); // 즉시 점프 시도
-            }
-        };
-        const endJumping = (e) => {
-            e.preventDefault();
-            btnJump.classList.remove('pressed');
-            isJumpPressed = false; // 누름 상태 해제
-            if (gameState === STATE.PLAYING) {
-                chicken.cutJump();
-            }
-        };
-        // [수정] addEventListener 방식으로 변경하여 터치 반응성 개선
-        btnJump.addEventListener('mousedown', startJumping);
-        btnJump.addEventListener('mouseup', endJumping);
-        btnJump.addEventListener('mouseleave', endJumping);
-        btnJump.addEventListener('touchstart', startJumping, { passive: false });
-        btnJump.addEventListener('touchend', endJumping);
-        btnJump.addEventListener('touchcancel', endJumping);
-    }
-    const btnBoost = document.getElementById('btn-boost');
-    if (btnBoost) {
-        const startBoosting = (e) => {
-            e.preventDefault();
-            if (gameState === STATE.PLAYING) {
-                btnBoost.classList.add('pressed');
-                chicken.isBoosting = true;
-            }
-        };
-        const endBoosting = (e) => {
-            e.preventDefault();
-            btnBoost.classList.remove('pressed');
-            chicken.isBoosting = false;
-        };
-        // [수정] addEventListener 방식으로 변경하여 터치 반응성 개선
-        btnBoost.addEventListener('mousedown', startBoosting);
-        btnBoost.addEventListener('mouseup', endBoosting);
-        btnBoost.addEventListener('mouseleave', endBoosting);
-        btnBoost.addEventListener('touchstart', startBoosting, { passive: false });
-        btnBoost.addEventListener('touchend', endBoosting);
-        btnBoost.addEventListener('touchcancel', endBoosting);
-    }
-
-    // [수정] 모달 내 range input 값 표시 및 프로그레스 바 업데이트
-    const setupRangeInput = (rangeId, displayId) => {
-        const rangeInput = document.getElementById(rangeId);
-        if (!rangeInput) return;
-
-        const update = () => {
-            // 1. 텍스트 값 업데이트
-            const displayEl = document.getElementById(displayId);
-            if (displayEl) displayEl.innerText = rangeInput.value;
-            
-            // [신규] 시도 횟수 슬라이더 변경 시 차감 코인 표시 업데이트
-            const displayCost = document.getElementById('display-cost');
-            if (rangeId === 'input-room-attempts' && displayCost) displayCost.innerText = rangeInput.value;
-
-            // 2. CSS 변수를 이용한 프로그레스 바 업데이트
-            const min = parseFloat(rangeInput.min) || 0;
-            const max = parseFloat(rangeInput.max) || 100;
-            const value = parseFloat(rangeInput.value);
-            const percent = ((value - min) / (max - min)) * 100;
-            rangeInput.style.setProperty('--progress-percent', `${percent}%`);
-        };
-
-        rangeInput.addEventListener('input', update);
-        update(); // 초기 로드 시 한 번 실행하여 현재 값으로 프로그레스 바를 채웁니다.
-    };
-    setupRangeInput('input-room-limit', 'display-limit');
-    setupRangeInput('input-room-attempts', 'display-attempts');
-
-    // [신규] 순위 결정 방식 토글 버튼 이벤트
-    document.querySelectorAll('#group-rank-type button').forEach(btn => {
-        btn.onclick = () => {
-            // 먼저 모든 버튼에서 active 클래스 제거
-            document.querySelectorAll('#group-rank-type button').forEach(b => b.classList.remove('active'));
-            // 클릭된 버튼에만 active 클래스 추가
-            btn.classList.add('active');
-        };
-    });
-
-    // 키보드 점프 (누르는 시간에 따라 높이 조절)
-    window.addEventListener('keydown', (e) => {
-        if (e.code === 'Space' && gameState === STATE.PLAYING) {
-            e.preventDefault(); 
-            if (!isJumpPressed) { // [신규] 처음 눌렀을 때만 실행
-                isJumpPressed = true;
-                if (!chicken.isJumping) chicken.jump();
-            }
-        }
-    });
-    window.addEventListener('keyup', (e) => {
-        if (e.code === 'Space' && gameState === STATE.PLAYING) {
-            e.preventDefault(); isJumpPressed = false; chicken.cutJump();
-        }
-    });
-
-    // [개발용] 콘솔에서 초기화 함수를 쉽게 호출할 수 있도록 window 객체에 할당
-    window.resetAdCount = resetAdCount;
-    window.resetRoomData = resetRoomData;
-});
