@@ -1104,10 +1104,15 @@ function mapFirestoreDocToRoom(doc) {
 
 let roomFetchPromise = null; 
 
+let roomFetchPromise = null; 
+
 function fetchRaceRooms(loadMore = false) {
     if (roomFetchPromise && !loadMore) return roomFetchPromise;
 
+    let resolvePromise;
     roomFetchPromise = new Promise((resolve, reject) => {
+        resolvePromise = resolve; // Promise 종료를 나중에 제어하기 위해 저장
+        
         if (loadMore) {
             currentRoomLimit += ROOMS_PER_PAGE;
         } else {
@@ -1128,12 +1133,19 @@ function fetchRaceRooms(loadMore = false) {
             .orderBy('createdAt', 'desc')
             .limit(currentRoomLimit + 5)
             .onSnapshot((querySnapshot) => {
-                if (isFirstCallback) {
+                
+                // 💡 핵심 방어 로직: 서버 응답 전의 '빈 깡통 캐시'를 식별합니다.
+                const isCacheEmpty = querySnapshot.metadata.fromCache && querySnapshot.empty;
+
+                // 빈 깡통이 아닐 때만 첫 콜백으로 인정하여 목록을 갈아끼웁니다.
+                if (isFirstCallback && !isCacheEmpty) {
                     const newRooms = [];
                     querySnapshot.forEach(doc => {
                         newRooms.push(mapFirestoreDocToRoom(doc));
                     });
-                    raceRooms = newRooms;
+                    raceRooms = newRooms; // 최신 데이터 갱신
+                    
+                    isFirstCallback = false; // 이제부터는 실시간 '레이아웃 안정' 모드로 전환
 
                     if (querySnapshot.docs.length <= currentRoomLimit) {
                         allRoomsLoaded = true;
@@ -1143,11 +1155,13 @@ function fetchRaceRooms(loadMore = false) {
                         if (loader) loader.classList.remove('hidden');
                     }
 
-                    renderRaceRoomList();
-                    updateLoadMoreButtons();
-                    isFirstCallback = false;
-                    resolve(); 
-                } else {
+                    if (resolvePromise) {
+                        resolvePromise();
+                        resolvePromise = null;
+                    }
+
+                } else if (!isFirstCallback) {
+                    // 화면에 머무는 동안의 실시간 동기화 (Laila님 의도대로 added 무시)
                     querySnapshot.docChanges().forEach((change) => {
                         const roomData = mapFirestoreDocToRoom(change.doc);
                         const index = raceRooms.findIndex(r => r.id === roomData.id);
@@ -1158,9 +1172,11 @@ function fetchRaceRooms(loadMore = false) {
                             if (index > -1) raceRooms[index].current = 0;
                         }
                     });
-                    renderRaceRoomList();
-                    updateLoadMoreButtons();
                 }
+
+                renderRaceRoomList();
+                updateLoadMoreButtons();
+
             }, (error) => {
                 console.error("❌ 방 목록 리스너 오류:", error);
                 if (loader) loader.classList.add('hidden');
