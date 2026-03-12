@@ -1237,9 +1237,6 @@ function fetchRaceRooms(loadMore = false) {
  * raceRooms(전체 목록)에 없는 오래된 방이라도 내가 참가 중이면 보여야 하기 때문입니다.
  */
 async function fetchMyRooms() {
-    // 1. 기존 '내 방' 리스너가 있다면 모두 해제합니다.
-    unsubscribeMyRoomsListeners.forEach(unsub => unsub());
-    unsubscribeMyRoomsListeners = [];
 
     if (!isLoggedIn || !currentUser || !currentUser.joinedRooms) {
         myRooms = [];
