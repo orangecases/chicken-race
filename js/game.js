@@ -63,6 +63,7 @@ const ROOMS_PER_PAGE = 5;     // 한 번에 불러올 방의 개수
 let allRoomsLoaded = false;    // 모든 방을 다 불러왔는지 여부 (더보기 버튼 표시 제어)
 let myRooms = [];              // [신규] 참가중인 방 목록 데이터 별도 저장
 let unsubscribeMyRoomsListeners = []; // [신규] '내 방' 목록 실시간 리스너 해제 함수 배열
+let lastJoinedRoomIdsJSON = ''; // [신규] 참가중인 방 목록 변경 감지용 변수
 
 // [신규] 광고 시스템 설정
 const AD_CONFIG = {
@@ -1237,18 +1238,29 @@ function fetchRaceRooms(loadMore = false) {
  * raceRooms(전체 목록)에 없는 오래된 방이라도 내가 참가 중이면 보여야 하기 때문입니다.
  */
 async function fetchMyRooms() {
-
     if (!isLoggedIn || !currentUser || !currentUser.joinedRooms) {
         myRooms = [];
         renderRoomLists(true);
         return;
     }
-    const roomIds = Object.keys(currentUser.joinedRooms);
+    const roomIds = Object.keys(currentUser.joinedRooms).sort(); // ID 정렬하여 비교
     if (roomIds.length === 0) {
         myRooms = [];
         renderRoomLists(true);
         return;
     }
+
+    // [신규] 참가한 방 목록이 이전과 동일하고, 리스너가 이미 동작 중이라면 재로딩하지 않음 (깜빡임 방지)
+    const currentJoinedRoomIdsJSON = JSON.stringify(roomIds);
+    if (unsubscribeMyRoomsListeners.length > 0 && lastJoinedRoomIdsJSON === currentJoinedRoomIdsJSON) {
+        renderRoomLists(); // UI만 갱신
+        return;
+    }
+    lastJoinedRoomIdsJSON = currentJoinedRoomIdsJSON;
+
+    // 1. 기존 '내 방' 리스너가 있다면 모두 해제합니다. (목록이 바뀌었을 때만 실행됨)
+    unsubscribeMyRoomsListeners.forEach(unsub => unsub());
+    unsubscribeMyRoomsListeners = [];
 
     // 로컬 myRooms 배열을 서버 상태와 동기화하기 위해 일단 비웁니다.
     myRooms = [];
