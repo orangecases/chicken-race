@@ -3343,11 +3343,13 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     // [수정] 레이스룸/참가중 탭 전환 시에는 renderRoomLists 함수를 콜백으로 전달하여 목록을 새로고침합니다.
     initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', async () => {
-        // [수정] 탭 전환 시에도 새로고침과 동일하게 동작하도록 Promise를 초기화하고 데이터를 다시 불러옵니다.
-        // [FIX] fetchRaceRooms가 완료될 때까지 기다린(await) 후 fetchMyRooms를 호출하여 렌더링 레이스 컨디션을 방지합니다.
-        console.log("🔄️ 탭 전환으로 목록을 새로고침합니다.");
+        initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', () => {
+        // [FIX] 탭 전환 시 목록이 비어 보이는 문제를 해결합니다.
+        // 원인: 탭 클릭 시 fetch가 완료되기도 전에 renderRoomLists(true)가 동기적으로 호출되어, 오래된 데이터로 목록을 다시 그렸습니다.
+        // 해결: 동기 렌더링을 제거하고, roomFetchPromise를 null로 만들어 항상 새로운 데이터를 가져오도록 강제합니다.
+        console.log("🔄️ 탭 전환으로 목록 새로고침을 요청합니다.");
         roomFetchPromise = null;
-        await fetchRaceRooms(false);
+        fetchRaceRooms(false);
         fetchMyRooms();
     });
 
@@ -3361,17 +3363,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // [신규] 탭 내 새로고침 버튼 이벤트
     document.querySelectorAll('.list-tabgroup .refresh').forEach(btn => {
-        btn.onclick = async (e) => {
-            e.stopPropagation(); // 부모인 탭의 클릭 이벤트가 전파되는 것을 막습니다.
-
-            // [FIX] 새로고침 버튼이 동작하지 않는 문제 해결
-            // 원인: 1. 중복 호출 방지 로직 때문에 새로고침이 무시됨. 2. '참가중' 목록 갱신 로직 누락.
-            // 해결: 1. 기존 Promise를 초기화하여 강제로 목록을 다시 불러오도록 수정.
-            //      2. '참가중' 목록도 함께 갱신하도록 fetchMyRooms()를 호출.
-            //      3. [FIX] fetchRaceRooms가 완료될 때까지 기다린(await) 후 fetchMyRooms를 호출하여 데이터 경합을 방지합니다.
-            console.log("🔄️ 목록 새로고침 버튼 클릭됨.");
-            roomFetchPromise = null; // 기존 Promise를 초기화하여 fetchRaceRooms가 다시 실행되도록 함
-            await fetchRaceRooms(false);
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            console.log("🔄️ 새로고침 버튼으로 목록 새로고침을 요청합니다.");
+            roomFetchPromise = null;
+            fetchRaceRooms(false);
             fetchMyRooms();
         };
     });
