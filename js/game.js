@@ -1201,7 +1201,8 @@ function fetchRaceRooms(loadMore = false) {
                         if (loader) loader.classList.remove('hidden');
                     }
 
-                    renderRoomLists();
+                    renderRaceRoomList();
+                    updateLoadMoreButtons();
                     isFirstCallback = false;
                     resolve(); // 데이터 로딩 완료 시 Promise 해결
                 } else {
@@ -1220,8 +1221,8 @@ function fetchRaceRooms(loadMore = false) {
                         }
                         // '추가(added)'는 무시합니다. 새 방은 '새로고침'이나 '더보기' 시에만 목록에 나타나야 합니다.
                     });
-                    // 변경 사항이 반영된 목록을 다시 그리지만, 스냅샷은 유지하여 목록 순서나 길이가 변하지 않게 합니다.
-                    renderRoomLists();
+                    renderRaceRoomList();
+                    updateLoadMoreButtons();
                 }
             }, (error) => {
                 console.error("❌ 방 목록 리스너 오류:", error);
@@ -1293,7 +1294,8 @@ async function fetchMyRooms() {
                     const timeB = b.createdAt?.toMillis() || 0;
                     return timeB - timeA;
                 });
-                renderRoomLists(); // 목록 갱신
+                renderMyRoomList(); // 목록 갱신
+                updateLoadMoreButtons();
             }, error => {
                 console.error(`❌ 내 방 [${roomId}] 실시간 수신 오류:`, error);
             });
@@ -1872,17 +1874,17 @@ function renderRoomLists() {
         }
     });
 
-    // [수정] 목록이 비어있을 때 안내 문구 표시 로직 개선
-    if (raceRoomList.children.length === 0) {
-        raceRoomList.innerHTML = '<li><div class="info" style="text-align:center; width:100%;"><p>참여 가능한 레이스룸이 없습니다.</p></div></li>';
-    }
-    // '참가중인 방' 목록 상태 메시지 처리
     if (!isLoggedIn) {
         myRoomList.innerHTML = '<li><div class="info" style="text-align:center; width:100%;"><p>로그인 후 이용 가능합니다.</p></div></li>';
     } else if (myRoomList.children.length === 0) {
         myRoomList.innerHTML = '<li><div class="info" style="text-align:center; width:100%;"><p>참가중인 레이스룸이 없습니다.</p></div></li>';
     }
+}
 
+/**
+ * [리팩토링] '더보기' 버튼의 표시 상태를 업데이트하는 함수
+ */
+function updateLoadMoreButtons() {
     // [신규] 탭 상태에 따라 '더보기' 버튼(로더) 표시 여부 제어
     const loader = document.getElementById('race-room-loader');
     const myLoader = document.getElementById('my-room-loader');
@@ -1902,6 +1904,15 @@ function renderRoomLists() {
             else myLoader.classList.add('hidden');
         }
     }
+}
+
+/**
+ * [리팩토링] 모든 방 목록 UI를 새로고침하는 통합 함수
+ */
+function renderRoomLists() {
+    renderRaceRoomList();
+    renderMyRoomList();
+    updateLoadMoreButtons();
 }
 
 async function enterGameScene(mode, roomData = null) { // [수정] 비동기 함수로 변경
@@ -2889,6 +2900,75 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnPauseToggle = document.getElementById('btn-pause-toggle');
     const btnResumeGame = document.getElementById('btn-resume-game');
 
+    // [FIX] 누락된 이벤트 핸들러 추가
+    // --- 방 만들기 모달 UI 요소 ---
+    const rankTypeGroup = document.getElementById('group-rank-type');
+    if (rankTypeGroup) {
+        rankTypeGroup.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                rankTypeGroup.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+                e.target.classList.add('active');
+            }
+        });
+    }
+
+    const inputAttempts = document.getElementById('input-room-attempts');
+    const displayAttempts = document.getElementById('display-attempts');
+    const displayCost = document.getElementById('display-cost');
+    if (inputAttempts && displayAttempts && displayCost) {
+        const updateCost = () => {
+            const attempts = inputAttempts.value;
+            displayAttempts.innerText = attempts;
+            displayCost.innerText = attempts;
+        };
+        inputAttempts.addEventListener('input', updateCost);
+        updateCost();
+    }
+
+    const inputLimit = document.getElementById('input-room-limit');
+    const displayLimit = document.getElementById('display-limit');
+    if (inputLimit && displayLimit) {
+        const updateLimit = () => {
+            displayLimit.innerText = inputLimit.value;
+        };
+        inputLimit.addEventListener('input', updateLimit);
+        updateLimit();
+    }
+    
+    const rangeInputs = document.querySelectorAll('.modal-theme-orange input[type="range"]');
+    rangeInputs.forEach(range => {
+        const updateRangeProgress = () => {
+            const value = (range.value - range.min) / (range.max - range.min) * 100;
+            range.style.setProperty('--progress-percent', `${value}%`);
+        };
+        range.addEventListener('input', updateRangeProgress);
+        updateRangeProgress();
+    });
+
+    // --- 게임 컨트롤 버튼(점프, 부스트) ---
+    const btnJump = document.getElementById('btn-jump');
+    const btnBoost = document.getElementById('btn-boost');
+
+    if (btnJump) {
+        const handleJumpStart = (e) => { e.preventDefault(); isJumpPressed = true; btnJump.classList.add('pressed'); };
+        const handleJumpEnd = (e) => { e.preventDefault(); isJumpPressed = false; chicken.cutJump(); btnJump.classList.remove('pressed'); };
+        btnJump.addEventListener('mousedown', handleJumpStart);
+        btnJump.addEventListener('mouseup', handleJumpEnd);
+        btnJump.addEventListener('mouseleave', handleJumpEnd);
+        btnJump.addEventListener('touchstart', handleJumpStart, { passive: false });
+        btnJump.addEventListener('touchend', handleJumpEnd);
+    }
+
+    if (btnBoost) {
+        const handleBoostStart = (e) => { e.preventDefault(); chicken.isBoosting = true; btnBoost.classList.add('pressed'); };
+        const handleBoostEnd = (e) => { e.preventDefault(); chicken.isBoosting = false; btnBoost.classList.remove('pressed'); };
+        btnBoost.addEventListener('mousedown', handleBoostStart);
+        btnBoost.addEventListener('mouseup', handleBoostEnd);
+        btnBoost.addEventListener('mouseleave', handleBoostEnd);
+        btnBoost.addEventListener('touchstart', handleBoostStart, { passive: false });
+        btnBoost.addEventListener('touchend', handleBoostEnd);
+    }
+
     // [신규] 비밀번호 모달 관련 요소
     const scenePasswordInput = document.getElementById('scene-password-input');
     const btnPasswordConfirm = document.getElementById('btn-password-confirm');
@@ -3320,11 +3400,10 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     // [수정] 레이스룸/참가중 탭 전환 시에는 renderRoomLists 함수를 콜백으로 전달하여 목록을 새로고침합니다.
     initTabs('tab-race-room', 'tab-my-rooms', 'content-race-room', 'content-my-rooms', () => {
-        // [FIX] 탭 전환 시 목록이 비어 보이는 문제를 해결합니다.
-        // 원인: 탭 클릭 시 fetch가 완료되기도 전에 renderRoomLists(true)가 동기적으로 호출되어, 오래된 데이터로 목록을 다시 그렸습니다.
-        // 해결: 동기 렌더링을 제거하고, roomFetchPromise를 null로 만들어 항상 새로운 데이터를 가져오도록 강제합니다.
         console.log("🔄️ 탭 전환으로 목록 새로고침을 요청합니다.");
         roomFetchPromise = null;
+        // [FIX] 탭 전환 시 각 목록이 독립적으로 갱신되도록 fetch 함수를 호출합니다.
+        // 내부적으로 각 fetch 함수가 자신의 목록만 렌더링하도록 수정되었습니다.
         fetchRaceRooms(false);
         fetchMyRooms();
     });
