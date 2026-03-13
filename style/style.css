@@ -629,7 +629,7 @@ html, body small{font-size: 70%;}
 
 .score-list li.top {
     position: sticky;
-    top: 0;
+    top: -1px;
     z-index: 10;;
     background-color: #3a413f;
 }
