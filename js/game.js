@@ -1602,11 +1602,16 @@ function renderMultiRanking() {
 
         let botControlButtonsHTML = '';
         if (currentUser && currentUser.isAdmin && p.isBot) { 
+            // 🚨 봇이 이미 삭제(hidden) 처리되었다면 투명도 0.3 적용 및 클릭 방지
+            const deleteBtnStyle = p.hidden ? 'opacity: 0.3; pointer-events: none; cursor: default;' : '';
+            // (선택) 텍스트도 '삭제됨'으로 바꾸면 더 직관적이야! 원치 않으면 '목록삭제'로 유지해도 무방해.
+            const deleteBtnText = p.hidden ? '삭제됨' : '목록삭제'; 
+
             botControlButtonsHTML = `
                 <div>
                     <button class="debug-btn" data-bot-id="${p.id}" data-action="force-start">게임실행</button>
                     <button class="debug-btn" data-bot-id="${p.id}" data-action="force-end">게임종료</button>
-                    <button class="debug-btn" data-bot-id="${p.id}" data-action="force-delete">목록삭제</button>
+                    <button class="debug-btn" data-bot-id="${p.id}" data-action="force-delete" style="${deleteBtnStyle}">${deleteBtnText}</button>
                 </div>
             `;
         }
