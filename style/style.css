@@ -643,8 +643,7 @@ html, body small{font-size: 70%;}
     font-size: 1.25rem;
     display: flex;
     justify-content: flex-start;
-    align-items: center;
-    gap: 0.5rem;
+    align-items: flex-end;
 }
 
 
