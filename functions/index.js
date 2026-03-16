@@ -1,6 +1,7 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const axios = require('axios');
+const cors = require('cors')({origin: true});
 
 if (!admin.apps.length) {
     admin.initializeApp();
@@ -73,35 +74,45 @@ exports.naverLogin = functions.region(REGION).https.onCall(async (data, context)
 
 /**
  * [수정] 다수의 사용자 ID(uid)를 받아 각 사용자의 최신 닉네임을 반환합니다.
- * - onRequest에서 onCall로 변경하여 클라이언트(game.js)의 httpsCallable 호출과 일치시킵니다.
- * - onCall 함수는 CORS를 자동으로 처리하므로 수동 CORS 설정이 필요 없습니다.
- * - 인증 검사를 제거하여 로그인하지 않은 사용자도 Top 100 랭킹을 볼 수 있도록 합니다.
+ * - onCall 방식의 CORS 오류가 계속 발생하여, 더 명시적인 onRequest 방식으로 변경합니다.
+ * - cors 미들웨어를 사용하여 모든 출처의 요청을 허용하고 preflight 요청을 처리합니다.
+ * - 클라이언트의 httpsCallable 호출 방식과 호환되도록 요청/응답 구조를 유지합니다.
  */
-exports.getNicknames = functions.region(REGION).https.onCall(async (data, context) => {
-    const uids = data.uids;
+exports.getNicknames = functions.region(REGION).https.onRequest((req, res) => {
+    // CORS 미들웨어를 사용하여 preflight(OPTIONS) 요청을 자동으로 처리합니다.
+    cors(req, res, async () => {
+        // httpsCallable은 항상 POST 요청을 보냅니다.
+        if (req.method !== 'POST') {
+            return res.status(405).send('Method Not Allowed');
+        }
 
-    if (!Array.isArray(uids) || uids.length === 0) {
-        throw new functions.https.HttpsError('invalid-argument', 'UID 배열이 필요합니다.');
-    }
+        // httpsCallable로 호출된 경우, 실제 데이터는 req.body.data 안에 있습니다.
+        const uids = req.body.data.uids;
 
-    if (uids.length > 100) {
-        throw new functions.https.HttpsError('invalid-argument', '한 번에 100명 이상의 닉네임을 요청할 수 없습니다.');
-    }
+        if (!Array.isArray(uids) || uids.length === 0) {
+            return res.status(400).json({ error: { message: 'UID 배열이 필요합니다.' } });
+        }
 
-    const db = admin.firestore();
-    const userDocsPromises = uids.map(uid => db.collection('users').doc(uid).get());
+        if (uids.length > 100) {
+            return res.status(400).json({ error: { message: '한 번에 100명 이상의 닉네임을 요청할 수 없습니다.' } });
+        }
 
-    try {
-        const userDocs = await Promise.all(userDocsPromises);
-        const nicknameMap = {};
-        userDocs.forEach(doc => {
-            nicknameMap[doc.id] = (doc.exists && doc.data().nickname) ? doc.data().nickname : '알수없음';
-        });
-        return nicknameMap;
-    } catch (error) {
-        console.error("❌ 닉네임 일괄 조회 실패:", error);
-        throw new functions.https.HttpsError('internal', '닉네임을 조회하는 중 서버 오류가 발생했습니다.');
-    }
+        const db = admin.firestore();
+        const userDocsPromises = uids.map(uid => db.collection('users').doc(uid).get());
+
+        try {
+            const userDocs = await Promise.all(userDocsPromises);
+            const nicknameMap = {};
+            userDocs.forEach(doc => {
+                nicknameMap[doc.id] = (doc.exists && doc.data().nickname) ? doc.data().nickname : '알수없음';
+            });
+            // httpsCallable은 응답 본문이 { data: ... } 형태일 것으로 기대합니다.
+            return res.status(200).json({ data: nicknameMap });
+        } catch (error) {
+            console.error("❌ 닉네임 일괄 조회 실패:", error);
+            return res.status(500).json({ error: { message: '닉네임을 조회하는 중 서버 오류가 발생했습니다.' } });
+        }
+    });
 });
 
 exports.createUserDocument = functions.region(REGION).auth.user().onCreate(async (user) => {
