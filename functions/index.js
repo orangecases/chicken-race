@@ -1,6 +1,7 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const axios = require('axios');
+const cors = require('cors')({origin: true});
 
 if (!admin.apps.length) {
     admin.initializeApp();
@@ -73,6 +74,49 @@ exports.naverLogin = functions.https.onCall(async (data, context) => {
         // 프론트엔드 콘솔에 정확히 어떤 단계에서 에러가 났는지 뿌려줍니다.
         throw new functions.https.HttpsError('internal', error.message);
     }
+});
+
+/**
+ * [수정] 다수의 사용자 ID(uid)를 받아 각 사용자의 최신 닉네임을 반환합니다.
+ * - onCall에서 onRequest로 변경하고 cors 미들웨어를 사용하여 CORS 문제를 해결합니다.
+ * - Top 100 랭킹은 누구나 볼 수 있어야 하므로 인증 체크를 제거합니다.
+ */
+exports.getNicknames = functions.https.onRequest((req, res) => {
+    // CORS preflight 요청을 처리하고 실제 요청에 대한 헤더를 설정합니다.
+    cors(req, res, async () => {
+        // httpsCallable로 호출 시 데이터는 req.body.data에 있습니다.
+        const uids = req.body.data.uids;
+
+        if (!Array.isArray(uids) || uids.length === 0) {
+            return res.status(400).send({ error: { message: 'UID 배열이 필요합니다.' } });
+        }
+
+        // 한 번에 너무 많은 요청을 보내는 것을 방지합니다 (최대 100명).
+        if (uids.length > 100) {
+            return res.status(400).send({ error: { message: '한 번에 100명 이상의 닉네임을 요청할 수 없습니다.' } });
+        }
+
+        const db = admin.firestore();
+        const userDocsPromises = uids.map(uid => db.collection('users').doc(uid).get());
+
+        try {
+            const userDocs = await Promise.all(userDocsPromises);
+            const nicknameMap = {};
+            userDocs.forEach(doc => {
+                if (doc.exists) {
+                    nicknameMap[doc.id] = doc.data().nickname || '이름없음';
+                } else {
+                    // 랭킹에 있지만 삭제된 유저일 경우
+                    nicknameMap[doc.id] = '알수없음';
+                }
+            });
+            // httpsCallable은 응답이 { data: ... } 형태일 것으로 기대합니다.
+            res.status(200).send({ data: nicknameMap });
+        } catch (error) {
+            console.error("❌ 닉네임 일괄 조회 실패:", error);
+            res.status(500).send({ error: { message: '닉네임을 조회하는 중 서버 오류가 발생했습니다.' } });
+        }
+    });
 });
 
 /**
