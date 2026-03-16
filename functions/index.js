@@ -6,7 +6,9 @@ if (!admin.apps.length) {
     admin.initializeApp();
 }
 
-exports.naverLogin = functions.https.onCall(async (data, context) => {
+const REGION = 'asia-northeast3'; // 서울 리전
+
+exports.naverLogin = functions.region(REGION).https.onCall(async (data, context) => {
     let accessToken = null;
     if (typeof data === 'string') accessToken = data;
     else if (data && data.accessToken) accessToken = data.accessToken;
@@ -75,7 +77,7 @@ exports.naverLogin = functions.https.onCall(async (data, context) => {
  * - onCall 함수는 CORS를 자동으로 처리하므로 수동 CORS 설정이 필요 없습니다.
  * - 인증 검사를 제거하여 로그인하지 않은 사용자도 Top 100 랭킹을 볼 수 있도록 합니다.
  */
-exports.getNicknames = functions.https.onCall(async (data, context) => {
+exports.getNicknames = functions.region(REGION).https.onCall(async (data, context) => {
     const uids = data.uids;
 
     if (!Array.isArray(uids) || uids.length === 0) {
@@ -102,7 +104,7 @@ exports.getNicknames = functions.https.onCall(async (data, context) => {
     }
 });
 
-exports.createUserDocument = functions.auth.user().onCreate(async (user) => {
+exports.createUserDocument = functions.region(REGION).auth.user().onCreate(async (user) => {
     const { uid, email } = user;
     console.log(`새로운 사용자 생성됨: ${uid}, Email: ${email}`);
 
