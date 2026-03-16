@@ -1055,31 +1055,51 @@ function renderTop100List() {
 /**
  * [신규] 서버 랭킹 데이터를 화면에 표시
  */
-function displayRankings(rankData) {
+async function displayRankings(rankData) {
+    const uids = rankData.filter(data => data.uid).map(data => data.uid);
+    const uniqueUids = [...new Set(uids)];
+    const nicknameMap = new Map();
+
+    if (uniqueUids.length > 0) {
+        try {
+            const userDocsPromises = uniqueUids.map(uid => db.collection('users').doc(uid).get());
+            const userDocs = await Promise.all(userDocsPromises);
+
+            userDocs.forEach(doc => {
+                if (doc.exists) {
+                    const userData = doc.data();
+                    nicknameMap.set(doc.id, userData.nickname);
+                }
+            });
+        } catch (error) {
+            console.error("랭킹 닉네임 업데이트 중 오류 발생:", error);
+        }
+    }
+
     top100Scores = rankData.map((data, index) => ({
         rank: index + 1,
         score: data.score,
-        name: data.nickname
+        name: (data.uid && nicknameMap.get(data.uid)) || data.nickname
     }));
     renderTop100List();
 }
 
-function loadLeaderboard() {
-    db.collection("rankings")
-        .orderBy("score", "desc")
-        .limit(10)
-        .get()
-        .then((querySnapshot) => {
-            console.log("🏆 랭킹 데이터를 가져왔습니다:");
-            let rankData = [];
-            querySnapshot.forEach((doc) => {
-                rankData.push(doc.data());
-            });
-            displayRankings(rankData);
-        })
-        .catch((error) => {
-            console.error("❌ 랭킹 불러오기 실패:", error);
+async function loadLeaderboard() {
+    try {
+        const querySnapshot = await db.collection("rankings")
+            .orderBy("score", "desc")
+            .limit(10)
+            .get();
+
+        console.log("🏆 랭킹 데이터를 가져왔습니다:");
+        const rankData = [];
+        querySnapshot.forEach((doc) => {
+            rankData.push(doc.data());
         });
+        await displayRankings(rankData);
+    } catch (error) {
+        console.error("❌ 랭킹 불러오기 실패:", error);
+    }
 }
 
 /**
@@ -1549,20 +1569,47 @@ async function attemptToJoinRoom(room) {
 /**
  * [신규] 멀티플레이 랭킹 목록을 렌더링합니다.
  */
-function renderMultiRanking() {
+async function renderMultiRanking() {
     const listEl = document.getElementById('multi-score-list');
     if (!listEl || !currentRoom) return;
 
+    // Fetch current nicknames for all non-bot players
+    const playerIds = multiGamePlayers.filter(p => !p.isBot && p.id).map(p => p.id);
+    const uniquePlayerIds = [...new Set(playerIds)];
+    const nicknameMap = new Map();
+
+    if (uniquePlayerIds.length > 0) {
+        try {
+            const userDocsPromises = uniquePlayerIds.map(id => db.collection('users').doc(id).get());
+            const userDocs = await Promise.all(userDocsPromises);
+            userDocs.forEach(doc => {
+                if (doc.exists) {
+                    const userData = doc.data();
+                    nicknameMap.set(doc.id, userData.nickname);
+                }
+            });
+        } catch (error) {
+            console.error("멀티플레이 랭킹 닉네임 업데이트 중 오류 발생:", error);
+        }
+    }
+
+    // Use a new array with updated names for rendering
+    const playersWithUpdatedNames = multiGamePlayers.map(p => {
+        if (!p.isBot && nicknameMap.has(p.id)) {
+            return { ...p, name: nicknameMap.get(p.id) };
+        }
+        return p;
+    });
     const isTotalMode = currentRoom.rankType === 'total';
     const myId = currentUser ? currentUser.id : 'me';
 
-    const sortedPlayers = [...multiGamePlayers].sort((a, b) => {
+    const sortedPlayers = [...playersWithUpdatedNames].sort((a, b) => {
         const scoreA = a.id === myId ? calculateMyLocalDisplayScore() : (a.displayScore || 0);
         const scoreB = b.id === myId ? calculateMyLocalDisplayScore() : (b.displayScore || 0);
         return scoreB - scoreA;
     });
 
-    const isAllFinished = multiGamePlayers.every(p => p.status === 'dead');
+    const isAllFinished = playersWithUpdatedNames.every(p => p.status === 'dead');
 
     listEl.innerHTML = '';
     sortedPlayers.forEach((p, index) => {
