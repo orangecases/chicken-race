@@ -1876,9 +1876,9 @@ function renderRaceRoomList() {
             ${lockImg}
             <span class="stat"><img class="chevron" src="assets/images/ico128-chevron.png"/></span>`;
 
-        raceLi.onclick = () => {
-            if (!isJoinable) {
-                alert('인원이 모두 충원되었습니다.');
+        raceLi.onclick = (e) => {
+            // [FIX] 이벤트 버블링 방지: 디버그 버튼 클릭 시 방 입장을 막습니다.
+            if (e.target.closest('.debug-btn')) {
                 return;
             }
 
@@ -1931,7 +1931,12 @@ function renderMyRoomList() {
                     <p>${room.title} ${debugButtonsHTML}</p>
                 </div>
                 <span class="stat"><img class="chevron" src="assets/images/ico128-chevron.png"/></span>`;
-            myLi.onclick = () => {
+            myLi.onclick = (e) => {
+                // [FIX] 이벤트 버블링 방지: 디버그 버튼 클릭 시 방 입장을 막습니다.
+                if (e.target.closest('.debug-btn')) {
+                    return;
+                }
+                
                 if (!isLoggedIn) {
                     const sceneAuth = document.getElementById('scene-auth');
                     if (sceneAuth) {
