@@ -2417,11 +2417,9 @@ async function loadUserData(user) {
         };
 
         const docSnap = await userRef.get();
-        if (!docSnap.exists) {
-            await userRef.set(initialUserData);
-            console.log("✅ User document created on client-side.");
-        }
-
+        // [수정] 클라이언트에서 사용자 문서를 직접 생성하는 로직을 제거합니다.
+        // 이제 모든 신규 사용자 문서 생성은 백엔드의 'createUserDocument' Cloud Function이 담당하여
+        // 데이터 생성 로직을 일원화하고 안정성을 높입니다.
         let initialLoadComplete = false;
         unsubscribeUserData = userRef.onSnapshot((snapshot) => {
             if (!snapshot.exists) {
