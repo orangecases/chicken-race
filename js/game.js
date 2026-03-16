@@ -2966,17 +2966,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 initialBatch.set(creatorRef, creatorData);
                 await initialBatch.commit();
                 console.log("✅ 1단계: 방 및 생성자 정보 생성 완료! ID:", roomRef.id);
-
-                const botBatch = db.batch();
-                const botRef = roomRef.collection('participants').doc(`bot_${Date.now()}`);
-                const botData = { id: botRef.id, name: '초보닭', isBot: true, score: 0, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts, startDelay: 60, targetScore: 750 }; 
-                botBatch.set(botRef, botData);
-                botBatch.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
-                await botBatch.commit();
-                console.log("✅ 2단계: 초기 봇 추가 완료!");
-
-                roomData.currentPlayers = 2; 
-
+                
+                // [수정] 관리자 계정으로 방 생성 시에만 봇을 추가합니다.
+                if (currentUser && currentUser.isAdmin) {
+                    const botBatch = db.batch();
+                    const botRef = roomRef.collection('participants').doc(`bot_${Date.now()}`);
+                    const botData = { id: botRef.id, name: '초보닭', isBot: true, score: 0, totalScore: 0, bestScore: 0, status: 'waiting', displayScore: 0, attemptsLeft: attempts, startDelay: 60, targetScore: 750 }; 
+                    botBatch.set(botRef, botData);
+                    botBatch.update(roomRef, { currentPlayers: firebase.firestore.FieldValue.increment(1) });
+                    await botBatch.commit();
+                    console.log("✅ 2단계: 초기 봇 추가 완료!");
+    
+                    roomData.currentPlayers = 2; 
+                }
                 const newRoomForGame = mapFirestoreDocToRoom({ id: roomRef.id, data: () => roomData });
 
                 raceRooms.unshift(newRoomForGame);
