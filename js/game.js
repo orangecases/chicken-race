@@ -972,23 +972,53 @@ function getMyOverallRank(myBestScore) {
 /**
  * [신규] '내 기록'을 localStorage에 저장하고 목록을 다시 그립니다.
  */
-function saveMyScore(newScore) {
-    if (newScore <= 0) return; // 0점은 저장하지 않습니다.
+async function saveMyScore(newScore) {
+    if (newScore <= 0) return;
+
+    // [수정] 로그인한 유저만 서버에 기록을 저장합니다.
+    if (!currentUser) {
+        console.log("게스트 유저는 '내 기록'이 서버에 저장되지 않습니다.");
+        // 게스트 기록은 저장하지 않음으로써 서버 저장 방식으로 통일합니다.
+        return;
+    }
 
     const scoreEntry = {
         score: newScore,
-        date: new Date().toISOString() // 기록 시간을 ISO 표준 문자열로 저장
+        date: new Date().toISOString()
     };
-    myScores.push(scoreEntry);
-    myScores.sort((a, b) => b.score - a.score); // 점수 높은 순으로 정렬
 
-    if (myScores.length > 100) { // [수정] 최대 100개 기록 저장
-        myScores.length = 100;
+    // [수정] Firestore에서 가져온 유저 데이터의 myScores를 사용합니다.
+    const userScores = currentUser.myScores || [];
+    userScores.push(scoreEntry);
+    userScores.sort((a, b) => b.score - a.score);
+
+    const MAX_SCORES = 50; // 최대 50개 기록 저장
+    if (userScores.length > MAX_SCORES) {
+        userScores.length = MAX_SCORES;
     }
 
-    localStorage.setItem('chickenRunMyScores', JSON.stringify(myScores));
-    bestScore = myScores[0].score; // 최고 점수 업데이트
-    renderMyRecordList(); // 목록 UI 갱신
+    const newBestScore = userScores.length > 0 ? userScores[0].score : 0;
+
+    // 로컬 currentUser 객체 업데이트 (UI 즉시 반영용)
+    currentUser.myScores = userScores;
+    currentUser.bestScore = newBestScore;
+
+    // UI 갱신을 위해 전역 변수에도 동기화
+    myScores = currentUser.myScores;
+    bestScore = currentUser.bestScore;
+    renderMyRecordList();
+
+    // [수정] Firestore에 변경된 myScores와 bestScore를 업데이트합니다.
+    try {
+        const userRef = db.collection("users").doc(currentUser.id);
+        await userRef.update({
+            myScores: userScores,
+            bestScore: newBestScore
+        });
+        console.log("✅ '내 기록'이 서버에 성공적으로 업데이트되었습니다.");
+    } catch (error) {
+        console.error("❌ '내 기록' 서버 업데이트 실패:", error);
+    }
 }
 
 /**
@@ -1053,33 +1083,41 @@ function renderTop100List() {
 }
 
 /**
+ * [신규] Cloud Function을 호출하여 여러 사용자의 닉네임을 안전하게 가져옵니다.
+ * @param {string[]} uids - 닉네임을 조회할 사용자 UID 배열
+ * @returns {Promise<Object>} UID를 키로, 닉네임을 값으로 하는 객체
+ */
+async function fetchNicknames(uids) {
+    if (uids.length === 0) {
+        return {};
+    }
+    try {
+        // 'getNicknames'는 위에서 생성한 Cloud Function의 이름입니다.
+        const getNicknamesFunction = firebase.functions().httpsCallable('getNicknames');
+        const result = await getNicknamesFunction({ uids: uids });
+        return result.data; // { uid1: 'nickname1', uid2: 'nickname2', ... }
+    } catch (error) {
+        console.error("❌ 닉네임 가져오기 함수 호출 실패:", error);
+        // 함수 호출에 실패하더라도 앱이 중단되지 않도록 빈 객체를 반환합니다.
+        return {};
+    }
+}
+
+/**
  * [신규] 서버 랭킹 데이터를 화면에 표시
  */
 async function displayRankings(rankData) {
     const uids = rankData.filter(data => data.uid).map(data => data.uid);
     const uniqueUids = [...new Set(uids)];
-    const nicknameMap = new Map();
 
-    if (uniqueUids.length > 0) {
-        try {
-            const userDocsPromises = uniqueUids.map(uid => db.collection('users').doc(uid).get());
-            const userDocs = await Promise.all(userDocsPromises);
-
-            userDocs.forEach(doc => {
-                if (doc.exists) {
-                    const userData = doc.data();
-                    nicknameMap.set(doc.id, userData.nickname);
-                }
-            });
-        } catch (error) {
-            console.error("랭킹 닉네임 업데이트 중 오류 발생:", error);
-        }
-    }
+    // [수정] 클라이언트에서 직접 DB를 읽는 대신, Cloud Function을 호출합니다.
+    const nicknameMap = await fetchNicknames(uniqueUids);
 
     top100Scores = rankData.map((data, index) => ({
         rank: index + 1,
         score: data.score,
-        name: (data.uid && nicknameMap.get(data.uid)) || data.nickname
+        // [수정] 반환된 맵을 사용하여 닉네임을 설정합니다.
+        name: (data.uid && nicknameMap[data.uid]) || data.nickname
     }));
     renderTop100List();
 }
@@ -1342,6 +1380,64 @@ function togglePause() {
 }
 
 /**
+ * [신규] 싱글 플레이 시작/재시작 시 코인을 차감합니다.
+ * @returns {boolean} 코인 차감에 성공하여 게임을 시작할 수 있으면 true, 아니면 false.
+ */
+function handleSinglePlayerStartCost() {
+    if (currentGameMode !== 'single') return true; // 싱글 모드가 아니면 항상 통과
+
+    // 게스트 코인 충전
+    if (!currentUser && guestCoins < 1) {
+        alert("게스트 코인이 모두 소진되어 10코인을 새로 충전해 드립니다! 다시 신나게 달려보세요.");
+        guestCoins = 10;
+        localStorage.setItem('chickenRunGuestCoins', guestCoins);
+        updateCoinUI();
+    }
+
+    const cost = 1;
+    const currentCoins = currentUser ? currentUser.coins : guestCoins;
+
+    // 코인 부족 확인
+    if (currentCoins < cost) {
+        alert("코인이 부족하여 게임을 시작할 수 없습니다.");
+        return false;
+    }
+    
+    // 코인 차감
+    if (currentUser) {
+        currentUser.coins -= cost;
+        syncCoinsToServer(currentUser.coins);
+    } else {
+        guestCoins -= cost;
+        localStorage.setItem('chickenRunGuestCoins', guestCoins);
+    }
+    updateCoinUI();
+    return true;
+}
+
+/**
+ * [신규] 게임 플레이를 시작하는 핵심 로직 (애니메이션 및 상태 변경)
+ */
+function executeGameStart() {
+    if (gameLoopId) cancelAnimationFrame(gameLoopId);
+    
+    // 멀티플레이 시, 내 상태를 'playing'으로 변경하고 서버에 알림
+    if (currentGameMode === 'multi' && currentUser) {
+        const myId = currentUser.id;
+        const myPlayer = multiGamePlayers.find(p => p.id === myId);
+        if (myPlayer) {
+            myPlayer.status = 'playing';
+            const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
+            participantDocRef.update({ status: 'playing' }).catch(e => console.error("상태 업데이트 실패(playing)", e));
+        }
+    }
+    playSound('start');
+    playSound('bgm'); 
+    gameState = STATE.PLAYING; 
+    gameLoop();
+}
+
+/**
  * [신규] 서버에서 사용자를 방에서 퇴장시키는 백엔드 로직.
  */
 async function performServerExit(roomId, isFullExit) {
@@ -1573,33 +1669,21 @@ async function renderMultiRanking() {
     const listEl = document.getElementById('multi-score-list');
     if (!listEl || !currentRoom) return;
 
-    // Fetch current nicknames for all non-bot players
+    // [수정] 닉네임 조회를 위해 봇이 아닌 플레이어 ID 목록을 추출합니다.
     const playerIds = multiGamePlayers.filter(p => !p.isBot && p.id).map(p => p.id);
     const uniquePlayerIds = [...new Set(playerIds)];
-    const nicknameMap = new Map();
 
-    if (uniquePlayerIds.length > 0) {
-        try {
-            const userDocsPromises = uniquePlayerIds.map(id => db.collection('users').doc(id).get());
-            const userDocs = await Promise.all(userDocsPromises);
-            userDocs.forEach(doc => {
-                if (doc.exists) {
-                    const userData = doc.data();
-                    nicknameMap.set(doc.id, userData.nickname);
-                }
-            });
-        } catch (error) {
-            console.error("멀티플레이 랭킹 닉네임 업데이트 중 오류 발생:", error);
-        }
-    }
+    // [수정] Cloud Function을 호출하여 최신 닉네임 맵을 가져옵니다.
+    const nicknameMap = await fetchNicknames(uniquePlayerIds);
 
-    // Use a new array with updated names for rendering
+    // [수정] 가져온 최신 닉네임으로 플레이어 목록을 업데이트합니다.
     const playersWithUpdatedNames = multiGamePlayers.map(p => {
-        if (!p.isBot && nicknameMap.has(p.id)) {
-            return { ...p, name: nicknameMap.get(p.id) };
+        if (!p.isBot && nicknameMap[p.id]) {
+            return { ...p, name: nicknameMap[p.id] };
         }
         return p;
     });
+
     const isTotalMode = currentRoom.rankType === 'total';
     const myId = currentUser ? currentUser.id : 'me';
 
@@ -2346,6 +2430,11 @@ async function loadUserData(user) {
 
             currentUser = { ...currentUser, ...userData, email: correctEmail || userData.email, isAdmin: isAdminUser };
 
+            // [신규] Firestore에서 불러온 데이터로 '내 기록' 관련 변수 초기화
+            myScores = currentUser.myScores || [];
+            bestScore = currentUser.bestScore || 0;
+            renderMyRecordList(); // 기록을 불러온 후 목록 UI 갱신
+
             if (!initialLoadComplete) {
                 initialLoadComplete = true;
 
@@ -2513,6 +2602,11 @@ document.addEventListener('DOMContentLoaded', () => {
             currentUser = null;
             console.log("❓ 로그아웃 상태");
 
+            // [신규] 로그아웃 시 '내 기록' 관련 변수 및 UI 초기화
+            myScores = [];
+            bestScore = 0;
+            renderMyRecordList();
+
             updateCoinUI(); 
             roomFetchPromise = null; 
             fetchRaceRooms(false);
@@ -2524,11 +2618,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     generateTop100Scores(); 
-    myScores = JSON.parse(localStorage.getItem('chickenRunMyScores')) || [];
-    if (myScores.length > 0) {
-        bestScore = myScores[0].score;
-    }
-    renderMyRecordList();
+    // [수정] 로컬 스토리지에서 '내 기록'을 불러오는 로직을 제거합니다.
+    // 이제 모든 기록은 onAuthStateChanged를 통해 Firestore에서 가져옵니다.
+    renderMyRecordList(); // 초기에는 "기록 없음" 상태로 렌더링됩니다.
     renderTop100List();
 
     const btnLoadMore = document.getElementById('btn-load-more');
@@ -2634,10 +2726,8 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error("❌ 디버그 인원 수정 실패:", error);
         }
     };
-    document.getElementById('content-race-room').addEventListener('click', handleDebugBotAction, true);
-    document.getElementById('content-my-rooms').addEventListener('click', handleDebugBotAction, true);
-    document.getElementById('view-multi-rank').addEventListener('click', handleDebugBotAction, true);
-
+    // [리팩토링] 여러 곳에 분산된 디버그 버튼 리스너를 상위 컨테이너(#app-container) 하나로 통합하여 코드 중복을 줄이고 관리를 용이하게 합니다.
+    document.getElementById('app-container').addEventListener('click', handleDebugBotAction);
     const handleBotControlAction = async (e) => {
         const target = e.target.closest('.debug-btn[data-bot-id]');
         if (!target || !currentRoom) return;
@@ -3075,30 +3165,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (btnRaceStart) {
         btnRaceStart.onclick = () => {
-            if (currentGameMode === 'single') {
-                if (!currentUser && guestCoins < 1) {
-                    alert("게스트 코인이 모두 소진되어 10코인을 새로 충전해 드립니다! 다시 신나게 달려보세요.");
-                    guestCoins = 10;
-                    localStorage.setItem('chickenRunGuestCoins', guestCoins);
-                    updateCoinUI();
-                }
-
-                const currentCoins = currentUser ? currentUser.coins : guestCoins;
-                if (currentCoins < 1) {
-                    alert("코인이 부족하여 게임을 시작할 수 없습니다.");
-                    return;
-                }
-                
-                if (currentUser) {
-                    currentUser.coins -= 1;
-                    syncCoinsToServer(currentUser.coins);
-                } else {
-                    guestCoins -= 1;
-                    localStorage.setItem('chickenRunGuestCoins', guestCoins);
-                }
-                updateCoinUI();
+            // [리팩토링] 코인 차감 로직을 handleSinglePlayerStartCost 함수로 분리
+            if (currentGameMode === 'single' && !handleSinglePlayerStartCost()) {
+                return; // 코인이 부족하면 중단
             }
             
+            // 멀티 모드 코인 처리 (방 입장 시 1회 지불)
             if (currentGameMode === 'multi' && currentRoom && currentUser) {
                 const userRoomState = currentUser.joinedRooms[currentRoom.id];
                 if (userRoomState && !userRoomState.isPaid) {
@@ -3115,75 +3187,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
+            // [리팩토링] 게임 시작 로직을 executeGameStart 함수로 분리
             clearAutoActionTimer(); 
             document.getElementById('game-start-screen').classList.add('hidden');
             setControlsVisibility(true); 
-            setTimeout(() => {
-                if (gameLoopId) cancelAnimationFrame(gameLoopId);
-                
-                if (currentGameMode === 'multi' && currentUser) {
-                    const myId = currentUser.id;
-                    const myPlayer = multiGamePlayers.find(p => p.id === myId);
-                    if (myPlayer) {
-                        myPlayer.status = 'playing';
-                        const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
-                        participantDocRef.update({ status: 'playing' }).catch(e => console.error("상태 업데이트 실패(playing)", e));
-                    }
-                }
-                playSound('start');
-                playSound('bgm'); 
-                gameState = STATE.PLAYING; 
-                gameLoop();
-            }, 500);
+            setTimeout(executeGameStart, 500);
         };
     }
 
     if (btnRestart) {
         btnRestart.onclick = () => {
-            if (currentGameMode === 'single') {
-                if (!currentUser && guestCoins < 1) {
-                    alert("게스트 코인이 모두 소진되어 10코인을 새로 충전해 드립니다! 다시 신나게 달려보세요.");
-                    guestCoins = 10;
-                    localStorage.setItem('chickenRunGuestCoins', guestCoins);
-                    updateCoinUI();
-                }
-
-                const currentCoins = currentUser ? currentUser.coins : guestCoins;
-                if (currentCoins < 1) {
-                    alert("코인이 부족하여 게임을 시작할 수 없습니다.");
-                    return;
-                }
-                
-                if (currentUser) {
-                    currentUser.coins -= 1;
-                    syncCoinsToServer(currentUser.coins);
-                } else {
-                    guestCoins -= 1;
-                    localStorage.setItem('chickenRunGuestCoins', guestCoins);
-                }
-                updateCoinUI();
+            // [리팩토링] 코인 차감 로직을 handleSinglePlayerStartCost 함수로 분리
+            if (currentGameMode === 'single' && !handleSinglePlayerStartCost()) {
+                return; // 코인이 부족하면 중단
             }
+            // 멀티 모드에서는 재시작 시 별도 코인 차감이 없음
 
+            // [리팩토링] 게임 시작 로직을 executeGameStart 함수로 분리
             clearAutoActionTimer();
             document.getElementById('game-over-screen').classList.add('hidden');
             setControlsVisibility(true); 
             setTimeout(() => {
                 resetGame();
-                if (gameLoopId) cancelAnimationFrame(gameLoopId);
-
-                if (currentGameMode === 'multi' && currentUser) {
-                    const myId = currentUser.id;
-                    const myPlayer = multiGamePlayers.find(p => p.id === myId);
-                    if (myPlayer) {
-                        myPlayer.status = 'playing';
-                        const participantDocRef = db.collection('rooms').doc(currentRoom.id).collection('participants').doc(myId);
-                        participantDocRef.update({ status: 'playing' }).catch(e => console.error("상태 업데이트 실패(playing)", e));
-                    }
-                }
-                playSound('start');
-                playSound('bgm'); 
-                gameState = STATE.PLAYING; 
-                gameLoop();
+                executeGameStart();
             }, 500);
         };
     }

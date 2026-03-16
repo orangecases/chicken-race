@@ -105,6 +105,8 @@ exports.createUserDocument = functions.auth.user().onCreate(async (user) => {
         badges: { '1': 0, '2': 0, '3': 0 },
         joinedRooms: {},
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        bestScore: 0, // [신규] 개인 최고 점수
+        myScores: []  // [신규] 개인 상위 기록 목록
     };
 
     return userRef.set(initialUserData)
