@@ -1092,8 +1092,8 @@ async function fetchNicknames(uids) {
         return {};
     }
     try {
-        // 'getNicknames'는 위에서 생성한 Cloud Function의 이름입니다.
-        const getNicknamesFunction = firebase.functions().httpsCallable('getNicknames');
+        // [FIX] 기본 리전(us-central1) 대신, 함수가 배포된 서울 리전(asia-northeast3)을 명시적으로 지정합니다.
+        const getNicknamesFunction = firebase.functions('asia-northeast3').httpsCallable('getNicknames');
         const result = await getNicknamesFunction({ uids: uids });
         return result.data; // { uid1: 'nickname1', uid2: 'nickname2', ... }
     } catch (error) {
@@ -2541,7 +2541,8 @@ function loginWithNaver() {
             console.log("🔑 프론트엔드가 낚아챈 토큰:", accessToken);
 
             try {
-                const loginFunction = firebase.functions().httpsCallable('naverLogin');
+                // [FIX] 서울 리전(asia-northeast3)에 배포된 함수를 명시적으로 호출합니다.
+                const loginFunction = firebase.functions('asia-northeast3').httpsCallable('naverLogin');
                 const result = await loginFunction({ accessToken: accessToken });
                 const customToken = result.data.customToken;
 
