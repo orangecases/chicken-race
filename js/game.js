@@ -1378,23 +1378,30 @@ function togglePause() {
 function handleSinglePlayerStartCost() {
     if (currentGameMode !== 'single') return true; // 싱글 모드가 아니면 항상 통과
 
-    // 게스트 코인 충전
-    if (!currentUser && guestCoins < 1) {
-        alert("게스트 코인이 모두 소진되어 10코인을 새로 충전해 드립니다! 다시 신나게 달려보세요.");
-        guestCoins = 10;
-        localStorage.setItem('chickenRunGuestCoins', guestCoins);
-        updateCoinUI();
-    }
-
     const cost = 1;
     const currentCoins = currentUser ? currentUser.coins : guestCoins;
 
     // 코인 부족 확인
     if (currentCoins < cost) {
-        alert("코인이 부족하여 게임을 시작할 수 없습니다.");
+        // [수정] 게스트의 코인이 부족할 경우, 자동 충전 대신 로그인 화면을 띄워줍니다.
+        if (!currentUser) {
+            alert("코인이 모두 소진되었습니다. 로그인하여 더 많은 코인을 획득하세요!");
+            const sceneAuth = document.getElementById('scene-auth');
+            if (sceneAuth) {
+                sceneAuth.classList.remove('hidden');
+                const authMsg = sceneAuth.querySelector('.auth-message');
+                if (authMsg) {
+                    authMsg.style.display = 'block';
+                    authMsg.innerText = '코인을 모두 소진했습니다. 로그인 후 코인을 충전하거나 더 많은 게임에 참여할 수 있습니다.';
+                }
+            }
+        } else {
+            // 로그인한 유저의 코인이 부족한 경우
+            alert("코인이 부족하여 게임을 시작할 수 없습니다.");
+        }
         return false;
     }
-    
+
     // 코인 차감
     if (currentUser) {
         currentUser.coins -= cost;
