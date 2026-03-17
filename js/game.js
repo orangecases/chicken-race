@@ -75,17 +75,8 @@ const AD_CONFIG = {
 // [데이터] 방 정보 및 현재 진행 상태
 let currentRoom = null;
 let targetRoom = null; // [신규] 비밀번호 입력 중인 대상 방
-// [수정] 테스트 시나리오 다각화를 위해 레이스룸 데이터 확장
-// [수정] usedAttempts 속성을 제거합니다. 이 정보는 이제 사용자별로 currentUser.joinedRooms에 저장됩니다.
-let raceRooms = [
-    // { id: 1, title: "이 구역의 미친 닭 모여라!", limit: 5, current: 3, attempts: 3, status: "inprogress", rankType: 'total' },
-    // { id: 2, title: "초보만 오세요 제발", limit: 5, current: 1, attempts: 5, status: "inprogress", rankType: 'best' },
-    // { id: 3, title: "비밀의 방 (비번:1234)", limit: 5, current: 0, attempts: 3, status: "inprogress", isLocked: true, password: "1234", rankType: 'best' },
-    // { id: 4, title: "딱 한 자리 남음! (합산)", limit: 10, current: 9, attempts: 2, status: "inprogress", rankType: 'total' },
-    // { id: 5, title: "최고점 한판 승부", limit: 4, current: 1, attempts: 1, status: "inprogress", rankType: 'best' },
-    // { id: 6, title: "장기전: 끈기있는 닭들의 대결", limit: 8, current: 2, attempts: 5, status: "inprogress", rankType: 'total' },
-    // { id: 7, title: "완전히 종료된 방 (테스트용)", limit: 5, current: 5, attempts: 3, status: "finished", rankType: 'best' }
-];
+// [수정] raceRooms는 이제 Firestore에서 실시간으로 데이터를 받아오므로, 로컬 더미 데이터는 제거합니다.
+let raceRooms = [];
 let unlockedRoomIds = []; // [신규] 비밀번호 해제된 방 ID 목록
 
 // 물리 설정
