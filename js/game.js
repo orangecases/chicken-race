@@ -2250,7 +2250,7 @@ function getAdData() {
 }
 
 /**
- * [신규] 광고 시청 시뮬레이션 및 보상 지급
+ * [수정됨] 광고 시청 시뮬레이션 및 보상 지급 (앱 연동 기능 추가!)
  */
 function watchAdAndGetReward() {
     let adTimerInterval = null; 
@@ -2265,6 +2265,16 @@ function watchAdAndGetReward() {
         return;
     }
 
+    // 🌟 [핵심 마법] 만약 이 게임이 '스마트폰 앱'으로 포장되어 실행 중이라면?!
+    if (window.AndroidBridge && window.AndroidBridge.showAd) {
+        console.log("📱 스마트폰 앱 환경 감지됨! 진짜 구글 광고를 부릅니다.");
+        window.AndroidBridge.showAd(); // 앱의 네이티브(진짜) 광고 시스템 호출
+        return; // 진짜 광고를 띄웠으니, 아래의 가짜 웹 광고는 실행하지 않고 멈춥니다!
+    }
+
+    // 💻 앱이 아니라면 (기존처럼 컴퓨터 인터넷 창이라면) 10초짜리 가짜 광고를 보여줍니다.
+    console.log("💻 인터넷 브라우저 환경 감지됨! 테스트용 가짜 광고를 실행합니다.");
+    
     let adOverlay = document.getElementById('scene-ad-overlay');
     if (!adOverlay) {
         adOverlay = document.createElement('div');
@@ -2344,6 +2354,24 @@ function watchAdAndGetReward() {
         };
     }
 }
+
+// 🌟 [신규 추가] 스마트폰 앱에서 진짜 광고 시청을 완료하면 이 함수를 몰래 호출해 줍니다!
+window.giveRewardFromApp = function() {
+    console.log("🎁 띠링! 앱에서 진짜 광고 보상 지급 신호가 도착했습니다!");
+    
+    if (currentUser) {
+        // 코인 지급 및 저장 로직
+        currentUser.coins += AD_CONFIG.REWARD;
+        const currentAdData = getAdData();
+        currentAdData.count++;
+        localStorage.setItem('chickenRunAdData', JSON.stringify(currentAdData));
+        
+        syncCoinsToServer(currentUser.coins); // 서버에 저장
+        updateCoinUI(); // 화면에 코인 개수 업데이트
+        
+        alert(`광고 시청 완료! ${AD_CONFIG.REWARD} 코인이 지급되었습니다. 🍗`);
+    }
+};
 
 /**
  * [개발용] 광고 시청 횟수를 초기화합니다.
